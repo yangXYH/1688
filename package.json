@@ -58,6 +58,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "ui": "node scripts/web-ui.mjs",
     "build": "tsc -p tsconfig.json && node scripts/fix_bin_mode.mjs",
     "test": "vitest run",
     "test:unit": "vitest run --exclude tests/doctor-live.test.ts",

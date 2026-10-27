@@ -79,8 +79,10 @@ export async function run(opts: LoginOpts): Promise<void> {
         info('Scan the QR code with your 1688 or Taobao app.');
       } else {
         printInteractive('Generating QR code...');
-        attachQrRenderer(page);
       }
+      // Save the live QR in both modes so the local UI can display it while
+      // the visible browser remains available for any manual verification.
+      attachQrRenderer(page);
       await page.goto(LOGIN_URL);
       await waitForLogin(ctx, page, timeoutMs, headed);
       printInteractive('Confirmed. Finalizing session...');

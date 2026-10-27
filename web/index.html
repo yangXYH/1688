@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f6f8fb">
+    <title>1688 选品工作台</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="/" aria-label="1688 选品工作台首页">
+          <span class="brand-mark">88</span>
+          <span class="brand-copy"><strong>采货台</strong><small>1688 SOURCING</small></span>
+        </a>
+
+        <div class="nav-caption">找商品</div>
+        <nav class="main-nav">
+          <button class="nav-item active" type="button" data-mode="keyword">
+            <span class="nav-icon" aria-hidden="true">⌕</span><span>关键词搜索</span>
+          </button>
+          <button class="nav-item" type="button" data-mode="image">
+            <span class="nav-icon image-icon" aria-hidden="true">▧</span><span>图片找同款</span>
+          </button>
+          <button class="nav-item" type="button" data-mode="bestseller">
+            <span class="nav-icon" aria-hidden="true">↗</span><span>畅销排序</span>
+            <span class="nav-count">HOT</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-tip">
+          <div class="tip-icon">✦</div>
+          <strong>从灵感到货源</strong>
+          <p>用关键词或商品图片发现 1688 供应货源，结果可导出为表格。</p>
+        </div>
+
+        <div class="sidebar-foot">
+          <span class="local-dot"></span>
+          <span>数据在本机处理</span>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>工作台</span><span class="crumb-sep">/</span><strong id="crumb-title">关键词搜索</strong></div>
+          <div class="topbar-actions">
+            <span class="local-badge"><span class="local-dot"></span>本地连接</span>
+            <button class="account-status" type="button" id="refresh-status" title="刷新 1688 登录状态">
+              <span class="status-light" id="status-light"></span>
+              <span id="status-text">检查登录状态…</span>
+              <span class="refresh-mark" aria-hidden="true">↻</span>
+            </button>
+            <button class="login-button" type="button" id="login-button">扫码登录</button>
+          </div>
+        </header>
+
+        <div class="page-content">
+          <section class="page-heading">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-line"></span>PRODUCT SOURCING</div>
+              <h1 id="page-title">发现好货，从一个关键词开始<span class="title-period">.</span></h1>
+              <p id="page-subtitle">搜索 1688 商品，查看价格、供应商与销量线索。</p>
+            </div>
+            <div class="heading-side-note">
+              <span class="heading-note-icon">⌁</span>
+              <span>连着你的 1688 会话<br><strong>搜索结果实时获取</strong></span>
+            </div>
+          </section>
+
+          <section id="login-panel" class="login-panel" aria-label="1688 扫码登录" hidden>
+            <div class="login-qr-box">
+              <span id="login-qr-placeholder">正在生成二维码…</span>
+              <img id="login-qr" alt="1688 登录二维码，请使用 1688 或淘宝 App 扫描" width="208" height="208" hidden>
+            </div>
+            <div class="login-panel-copy">
+              <strong>扫码登录 1688</strong>
+              <p id="login-flow-message">正在打开登录窗口…</p>
+              <small>手机确认后，此页面会自动更新登录状态。若出现滑块，请在 1688 浏览器窗口中手动完成。</small>
+            </div>
+          </section>
+
+          <section class="search-panel" aria-label="商品搜索">
+            <div id="keyword-view">
+              <form id="keyword-form">
+                <label class="field-label" for="keyword-input">你想找什么？</label>
+                <div class="search-row">
+                  <div class="search-input-wrap">
+                    <span class="search-input-icon" aria-hidden="true">⌕</span>
+                    <input id="keyword-input" name="keyword" type="search" maxlength="100" placeholder="例如：复古玻璃花瓶、户外折叠椅" autocomplete="off" required>
+                    <kbd>↵</kbd>
+                  </div>
+                  <button class="primary-button" type="submit"><span class="button-search-icon">⌕</span><span id="keyword-button-label">开始搜索</span></button>
+                </div>
+                <div class="filter-row">
+                  <label class="compact-field"><span>排序方式</span>
+                    <select id="sort-select" name="sort">
+                      <option value="relevance">综合相关</option>
+                      <option value="best-selling">畅销优先</option>
+                      <option value="price-asc">价格从低到高</option>
+                      <option value="price-desc">价格从高到低</option>
+                    </select>
+                  </label>
+                  <label class="compact-field"><span>结果数量</span>
+                    <select id="max-select" name="max">
+                      <option value="20">20 件</option>
+                      <option value="30">30 件</option>
+                      <option value="50">50 件</option>
+                    </select>
+                  </label>
+                  <label class="compact-field price-field"><span>价格区间 ¥</span>
+                    <span class="price-inputs"><input id="price-min" type="number" min="0" placeholder="最低"><i>—</i><input id="price-max" type="number" min="0" placeholder="最高"></span>
+                  </label>
+                  <label class="check-field"><input id="exclude-ads" type="checkbox"><span class="fake-check"></span><span>排除推广商品</span></label>
+                  <span class="field-hint" id="sort-note">搜索结果可按价格或畅销程度排序</span>
+                </div>
+              </form>
+            </div>
+
+            <div id="image-view" hidden>
+              <div class="image-panel-heading">
+                <div><label class="field-label" for="image-url">上传图片，找相似货源</label><p>支持本地图片或公开图片链接，结果来自 1688 图搜。</p></div>
+                <span class="file-types">JPG&nbsp; PNG&nbsp; WEBP</span>
+              </div>
+              <form id="image-form">
+                <div class="image-mode-tabs" role="tablist" aria-label="图片来源">
+                  <button class="image-mode active" type="button" data-image-mode="file">上传本地图片</button>
+                  <button class="image-mode" type="button" data-image-mode="url">粘贴图片链接</button>
+                </div>
+                <div id="file-source" class="upload-zone">
+                  <input id="image-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+                  <button class="upload-pick" type="button" id="choose-image">
+                    <span class="upload-symbol">↑</span>
+                    <span class="upload-text"><strong id="upload-title">点击选择商品图片</strong><small id="upload-caption">也可以把图片拖到这里，最大 8 MB</small></span>
+                  </button>
+                  <img id="upload-preview" alt="待搜索的商品图片预览" hidden>
+                </div>
+                <div id="url-source" class="image-url-row" hidden>
+                  <span class="url-icon">↗</span>
+                  <input id="image-url" type="url" placeholder="https://… 图片地址">
+                </div>
+                <div class="image-submit-row">
+                  <label class="compact-field"><span>结果数量</span><select id="image-max"><option value="20">20 件</option><option value="30">30 件</option><option value="50">50 件</option></select></label>
+                  <button class="primary-button" type="submit"><span class="button-search-icon">⌕</span><span id="image-button-label">以图找同款</span></button>
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section class="result-section" aria-live="polite">
+            <div class="result-toolbar">
+              <div class="result-heading">
+                <span class="result-kicker" id="result-kicker">SEARCH RESULTS</span>
+                <h2 id="result-title">商品结果 <span class="result-count" id="result-count"></span></h2>
+              </div>
+              <div class="result-actions">
+                <span id="result-summary" class="result-summary">搜索后会在这里展示商品卡片</span>
+                <button id="export-button" class="secondary-button" type="button" disabled><span class="export-icon">↓</span>导出 CSV</button>
+              </div>
+            </div>
+            <div id="message-box" class="message-box" role="status" hidden></div>
+            <div id="results-grid" class="results-grid" hidden></div>
+            <div id="empty-state" class="empty-state">
+              <div class="empty-illustration" aria-hidden="true">
+                <div class="empty-orbit orbit-a"></div><div class="empty-orbit orbit-b"></div>
+                <div class="empty-box"><span class="empty-box-mark">88</span></div>
+                <span class="spark spark-one">✦</span><span class="spark spark-two">✧</span><span class="spark spark-three">·</span>
+              </div>
+              <strong id="empty-title">开始一次商品搜索</strong>
+              <p id="empty-copy">输入关键词，或切换到图片找同款，结果会显示在这里。</p>
+              <span class="empty-source" id="empty-source">仅展示 1688 实时返回的数据，不填充示例商品</span>
+            </div>
+          </section>
+
+          <footer class="page-footer"><span>1688 选品工作台</span><span>商品与价格以 1688 页面实时信息为准</span></footer>
+        </div>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

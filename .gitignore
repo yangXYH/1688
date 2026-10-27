@@ -18,6 +18,8 @@ Thumbs.db
 
 # Local runtime data (never in repo)
 .1688/
+.runtime/
+work/
 *.pid
 *.sock
 

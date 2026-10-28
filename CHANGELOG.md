@@ -5,6 +5,24 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Local workbench retains results, selection and filters per search mode;
+  failed requests label previous results with their original query. Invalid
+  price ranges are rejected inline and by the local API.
+- Inspection flags display source-labelled signals instead of unsupported
+  membership labels. Search demand signals expose additive source/period
+  metadata, and Excel exports preserve those signals and query provenance.
+- Web and CLI now share the default session home and display its path. The
+  npm package includes the `1688-ui` executable, web assets and export helpers;
+  the release gate checks npm's actual archive file list.
+- Removed the bin-mode helper's CRLF-sensitive hashbang and corrected its
+  direct-execution URL check. Permission tests now work on Windows too.
+
+### Added
+- Province, city and inspection-signal filters in the local workbench, plus
+  on-demand MOQ, tier-price and SKU comparison for up to five selected offers.
+- Consistent Excel exports with in-cell images for all three search modes.
+
 ## [0.1.48] - 2026-08-28
 
 ### Fixed

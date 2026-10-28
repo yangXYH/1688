@@ -1,6 +1,6 @@
-#!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export async function fixBinMode({
   platform = process.platform,
@@ -13,6 +13,6 @@ export async function fixBinMode({
   return { changed: true, reason: 'chmod-755', target };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   await fixBinMode();
 }

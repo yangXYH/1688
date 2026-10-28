@@ -15,12 +15,16 @@ export interface Offer {
   location: { province: string | null; city: string | null };
   bizType: string | null;
   verified: { factory: boolean; business: boolean; superFactory: boolean };
+  /** Payload flags, not independently validated membership credentials. */
+  verificationSource?: { endpoint: string; factory: string; business: string; superFactory: string };
   tags: string[];
   serviceTags?: string[];
   productBadges?: string[];
   demand?: {
     orderCountText: string | null;
     orderCount: number | null;
+    orderCountSource?: string | null;
+    orderCountPeriod?: string | null;
     repurchaseRateText: string | null;
     repurchaseRate: number | null;
   };
@@ -148,6 +152,12 @@ export function mapOffer(item: RawOfferItem): Offer | null {
       business: bool(d.businessInspection),
       superFactory: bool(d.superFactory),
     },
+    verificationSource: {
+      endpoint: SEARCH_MTOP_API,
+      factory: 'factoryInspection',
+      business: 'businessInspection',
+      superFactory: 'superFactory',
+    },
     tags,
     ...(serviceTags.length ? { serviceTags } : {}),
     ...(productBadges.length ? { productBadges } : {}),
@@ -157,6 +167,10 @@ export function mapOffer(item: RawOfferItem): Offer | null {
         typeof d.orderCount === 'number'
           ? d.orderCount
           : parseCountText(orderCountText),
+      orderCountSource: d.orderCountText != null ? 'orderCountText'
+        : typeof d.orderCount === 'string' ? 'orderCount'
+        : d.bookedCount != null ? 'bookedCount' : d.orderCount != null ? 'orderCount' : null,
+      orderCountPeriod: null,
       repurchaseRateText,
       repurchaseRate: parsePercentText(repurchaseRateText),
     },

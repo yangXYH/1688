@@ -53,3 +53,42 @@ search, best-selling sort, product links, image previews, and CSV export.
   tests passed, but `tests/fix-bin-mode.test.ts` could not import the unchanged
   `scripts/fix_bin_mode.mjs` (`SyntaxError: Invalid or unexpected token`).
   `docs-check`, `agent-map-check`, and `release-check` passed when run separately.
+
+## UI Refresh (2026-10-28)
+
+- Reworked the page with a light sidebar, forest-green accents, larger working
+  text, consistent inline SVG icons, a focused search panel, and responsive
+  keyword/image views. Added useful empty-state actions and keyword shortcuts.
+- Improved product cards with full-image containment, a currency prefix,
+  selected-card feedback, a list view, select-all, and export selection counts.
+- Added skeleton loading feedback and a dedicated account-connection notice.
+  Local connection badges and sidebar session text now reflect actual state.
+- Added accessible image-source tab relationships and arrow-key navigation.
+- Found a server error-handling issue during browser review: serialized route
+  promises were returned without awaiting them inside the outer try/catch.
+  Awaiting them now returns an HTTP error instead of an unhandled rejection.
+- Build and JavaScript syntax checks passed. All 80 HTML IDs are unique and all
+  63 static JS DOM references resolve. A rejected image request returned HTTP
+  400 and the following health request returned HTTP 200.
+- Browser checks passed for keyword shortcuts, image navigation, source tabs,
+  best-selling mode, card/list controls, and loading feedback. Detached DOM
+  checks verified safe card escaping, price display, and partial/all-selection
+  feedback without inserting sample products into the visible interface.
+- Both keyword and image layouts fit widths of 1440, 1024, 768, 390, and 320
+  pixels without horizontal overflow. The browser was left open on the updated
+  keyword view after restoring device metrics.
+- Screenshot capture is unreliable in this Ego Lite session: surface capture
+  times out and non-surface capture returns an unusable image. Page snapshots,
+  computed layout checks, and real control interactions were used instead.
+- The full agent gate still has the same unchanged `fix-bin-mode.test.ts`
+  import error recorded above; 29 suites / 187 tests and typecheck passed.
+
+## Clipboard Image Paste (2026-10-28)
+
+- The image-search upload panel now accepts image data from the browser paste
+  event while the local-file source is active. Pasted images use the existing
+  JPEG/PNG/WebP and 8 MB validation, preview, and search flow.
+- The local preview uses an object URL, so the page's image CSP includes
+  `blob:` to let the selected or pasted image render in the preview.
+- Updated the upload prompt and README so users know to copy an image and press
+  `Ctrl+V` while the image-search page is open.

@@ -7,6 +7,10 @@ const state = {
   previewUrl: null,
   busy: false,
   searchLabel: '',
+  searchFailed: false,
+  workspaces: {},
+  details: new Map(),
+  failures: new Map(),
   toastTimer: null,
   loginPollTimer: null,
   loginRequestActive: false,
@@ -14,6 +18,8 @@ const state = {
   connected: false,
   serviceAvailable: true,
   loginQrVersion: null,
+  resultView: 'grid',
+  connectionMessage: '',
 };
 
 const byId = (id) => document.getElementById(id);
@@ -29,26 +35,26 @@ const toast = byId('toast');
 const modeContent = {
   keyword: {
     crumb: '关键词搜索',
-    title: '发现好货，从一个关键词开始',
-    subtitle: '搜索 1688 商品，查看价格、供应商与销量线索。',
+    title: '发现值得采购的好货',
+    subtitle: '从一个关键词、一张图片，找到下一款好商品。',
     result: '商品结果',
     kicker: 'SEARCH RESULTS',
-    emptyTitle: '开始一次商品搜索',
-    emptyCopy: '输入关键词，或切换到图片找同款，结果会显示在这里。',
+    emptyTitle: '下一款好商品，从这里开始',
+    emptyCopy: '输入商品关键词，或上传一张图片，发现合适的供应货源。',
   },
   image: {
     crumb: '图片找同款',
-    title: '让图片帮你发现相似货源',
-    subtitle: '上传商品图或粘贴图片链接，在 1688 上查找相似商品。',
+    title: '看见喜欢的，找到相似的',
+    subtitle: '上传一张商品图片，让灵感与供应货源相遇。',
     result: '相似商品',
     kicker: 'IMAGE MATCHES',
     emptyTitle: '上传一张商品图片',
-    emptyCopy: '选择本地图片或粘贴公开图片地址，开始以图找货。',
+    emptyCopy: '选择本地图片、粘贴图片链接，或复制图片后按 Ctrl+V，开始以图找货。',
   },
   bestseller: {
     crumb: '畅销排序',
-    title: '看看哪些商品更受欢迎',
-    subtitle: '输入一个关键词，按 1688 搜索结果的畅销顺序浏览。',
+    title: '从畅销商品，发现新机会',
+    subtitle: '搜索一个品类，按畅销顺序浏览 1688 返回的商品。',
     result: '畅销搜索结果',
     kicker: 'BEST-SELLING SEARCH',
     emptyTitle: '搜一个品类关键词',
@@ -74,11 +80,20 @@ function safeHttpsUrl(value, allowedHosts = null) {
 }
 
 function setMode(mode) {
-  if (!modeContent[mode]) return;
+  if (!modeContent[mode] || state.busy) return;
+  state.workspaces[state.mode] = {
+    offers: state.offers, selected: state.selected, searchLabel: state.searchLabel,
+    searchFailed: state.searchFailed, filters: readKeywordFilters(),
+  };
   state.mode = mode;
-  state.offers = [];
-  state.selected.clear();
+  const saved = state.workspaces[mode];
+  state.offers = saved?.offers ?? [];
+  state.searchLabel = saved?.searchLabel ?? '';
+  state.searchFailed = saved?.searchFailed ?? false;
+  state.selected = saved?.selected ?? new Set();
+  restoreKeywordFilters(saved?.filters);
   clearMessage();
+  byId('comparison-panel').hidden = true;
   renderResults();
   navItems.forEach((item) => {
     const active = item.dataset.mode === mode;
@@ -97,24 +112,94 @@ function setMode(mode) {
   const isImage = mode === 'image';
   keywordView.hidden = isImage;
   imageView.hidden = !isImage;
-  byId('keyword-button-label').textContent = mode === 'bestseller' ? '查看畅销结果' : '开始搜索';
-  byId('sort-select').value = mode === 'bestseller' ? 'best-selling' : 'relevance';
+  byId('keyword-button-label').textContent = mode === 'bestseller' ? '查看畅销结果' : '搜索货源';
+  byId('empty-primary-label').textContent = isImage ? '选择商品图片' : '开始关键词搜索';
+  byId('empty-secondary-label').textContent = isImage ? '返回关键词搜索' : '试试以图找同款';
+  byId('empty-primary').querySelector('use').setAttribute('href', isImage ? '#i-upload' : '#i-search');
+  if (mode === 'bestseller') byId('sort-select').value = 'best-selling';
   byId('sort-select').disabled = mode === 'bestseller';
   byId('sort-note').textContent = mode === 'bestseller'
     ? '按关键词搜索结果畅销顺序排列；非官方类目榜单'
     : '搜索结果可按价格或畅销程度排序';
-  byId('result-summary').textContent = isImage ? '支持本地图片或公开图片链接' : '搜索后会在这里展示商品卡片';
+  renderResultSummary();
+}
+
+function readKeywordFilters() {
+  return {
+    keyword: byId('keyword-input').value.trim(), sort: byId('sort-select').value,
+    max: Number(byId('max-select').value), priceMin: byId('price-min').value,
+    priceMax: byId('price-max').value, province: byId('province-input').value.trim(),
+    city: byId('city-input').value.trim(), verified: byId('verified-select').value,
+    excludeAds: byId('exclude-ads').checked,
+  };
+}
+
+function restoreKeywordFilters(filters = {}) {
+  for (const [key, id] of Object.entries({ keyword: 'keyword-input', sort: 'sort-select', max: 'max-select', priceMin: 'price-min', priceMax: 'price-max', province: 'province-input', city: 'city-input', verified: 'verified-select' })) {
+    byId(id).value = filters[key] ?? ({ sort: 'relevance', max: 20, verified: 'any' }[key] ?? '');
+  }
+  byId('exclude-ads').checked = filters.excludeAds ?? false;
+  validatePrices();
+}
+
+function validatePrices() {
+  const min = byId('price-min');
+  const max = byId('price-max');
+  let message = '';
+  if ([min, max].some((input) => input.validity.badInput || (input.value !== '' && (!Number.isFinite(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 1000000)))) {
+    message = '价格请输入 0 到 1,000,000 之间的数字。';
+  } else if (min.value !== '' && max.value !== '' && Number(min.value) > Number(max.value)) {
+    message = '最低价不能高于最高价。';
+  }
+  byId('price-error').textContent = message;
+  byId('price-error').hidden = !message;
+  min.setAttribute('aria-invalid', String(Boolean(message)));
+  max.setAttribute('aria-invalid', String(Boolean(message)));
+  byId('keyword-submit').disabled = state.busy || Boolean(message);
+  return !message;
+}
+
+function keywordSearchLabel(filters) {
+  const sort = { relevance: '综合排序', 'best-selling': '畅销排序', 'price-asc': '价格从低到高', 'price-desc': '价格从高到低' }[filters.sort];
+  const verified = { any: '不限标识', factory: '验厂线索', business: '验商线索', 'super-factory': '超级工厂线索' }[filters.verified];
+  return `关键词「${filters.keyword}」 · ${sort} · 价格 ${filters.priceMin || '不限'}–${filters.priceMax || '不限'} 元 · 地区 ${filters.province || '不限省份'}/${filters.city || '不限城市'} · ${verified} · ${filters.excludeAds ? '排除推广' : '含推广'} · 最多 ${filters.max} 件`;
+}
+
+function renderResultSummary() {
+  byId('result-summary').textContent = state.searchLabel
+    ? `${state.searchFailed ? '搜索未完成；以下为上一次搜索结果。原始条件：' : '结果条件：'}${state.searchLabel}`
+    : state.searchFailed ? '搜索未完成，暂无已保存结果' : '你找到的好货，都会出现在这里';
+  byId('result-summary').classList.toggle('stale-results', state.searchFailed && Boolean(state.searchLabel));
+}
+
+function searchFailed(error) {
+  state.searchFailed = true;
+  showMessage(error.message || '搜索未完成，请重试。');
+  renderResultSummary();
 }
 
 function setBusy(value, buttonLabelId, idleLabel) {
   state.busy = value;
+  byId('result-section').setAttribute('aria-busy', String(value));
+  byId('loading-state').hidden = !value;
+  resultsGrid.hidden = value || state.offers.length === 0;
+  emptyState.hidden = value || state.offers.length > 0;
+  exportButton.disabled = value || state.offers.length === 0;
   navItems.forEach((item) => { item.disabled = value; });
+  document.querySelectorAll('[data-keyword], [data-result-view], #select-all, #empty-primary, #empty-secondary').forEach((item) => { item.disabled = value; });
   document.querySelectorAll('[data-image-mode]').forEach((item) => { item.disabled = value; });
   const button = buttonLabelId === 'keyword-button-label'
     ? document.querySelector('#keyword-form .primary-button')
     : document.querySelector('#image-form .primary-button');
-  if (button) button.disabled = value;
+  if (button) {
+    button.disabled = value;
+    button.classList.toggle('is-loading', value);
+    button.setAttribute('aria-busy', String(value));
+  }
   byId(buttonLabelId).textContent = value ? '正在查找…' : idleLabel;
+  byId('compare-button').disabled = value || state.selected.size === 0 || state.selected.size > 5;
+  validatePrices();
+  updateLoginButton();
 }
 
 function showMessage(message, kind = 'error') {
@@ -158,9 +243,12 @@ async function refreshStatus() {
   light.className = 'status-light';
   try {
     const response = await fetch('/api/status', { cache: 'no-store' });
+    if (!response.ok) throw new Error('服务状态暂时不可用。');
     const status = await response.json();
+    byId('session-path').textContent = `当前会话：${status.sessionPath || '未知'}（默认 profile）`;
     state.serviceAvailable = true;
     state.connected = status.connected === true;
+    state.connectionMessage = status.message || '';
     if (status.login?.running) state.loginRunning = true;
     if (status.connected) {
       label.textContent = status.daemonRunning ? '1688 会话已连接' : '1688 已登录';
@@ -171,10 +259,10 @@ async function refreshStatus() {
     } else {
       label.textContent = /验证|risk|slider/i.test(status.message ?? '') ? '1688 需要验证' : '1688 未登录';
       light.className = 'status-light disconnected';
-      if (status.message) showMessage(status.message);
     }
   } catch {
     state.serviceAvailable = false;
+    state.connected = false;
     label.textContent = '本地服务未连接';
     light.className = 'status-light disconnected';
   }
@@ -184,7 +272,7 @@ async function refreshStatus() {
 function updateLoginButton() {
   const button = byId('login-button');
   if (!button) return;
-  button.disabled = state.loginRunning || !state.serviceAvailable;
+  button.disabled = state.loginRunning || state.busy || !state.serviceAvailable;
   button.classList.toggle('running', state.loginRunning);
   button.textContent = state.loginRunning
     ? '等待扫码…'
@@ -192,6 +280,26 @@ function updateLoginButton() {
   button.title = state.loginRunning
     ? '请在弹出的 1688 浏览器窗口扫码'
     : '打开 1688 登录窗口并扫码更新本机登录态';
+  updateAccountNotice();
+}
+
+function updateAccountNotice() {
+  const notice = byId('account-notice');
+  notice.hidden = state.connected || state.loginRunning;
+  notice.classList.toggle('offline', !state.serviceAvailable);
+  byId('account-notice-title').textContent = !state.serviceAvailable
+    ? '本地工作台连接已中断'
+    : /验证|risk|slider/i.test(state.connectionMessage) ? '1688 会话需要验证' : '连接你的 1688 账号，开始找货';
+  byId('account-notice-copy').textContent = !state.serviceAvailable
+    ? '请启动本地工作台服务，再重试连接。'
+    : state.connectionMessage || '扫码登录后，即可搜索商品、查看供应商并导出选品数据。';
+  byId('notice-action-label').textContent = state.serviceAvailable ? '扫码连接' : '重试连接';
+  byId('notice-login-button').disabled = state.busy || state.loginRunning;
+  byId('local-badge').classList.toggle('offline', !state.serviceAvailable);
+  byId('local-status-text').textContent = state.serviceAvailable ? '本地已连接' : '本地未连接';
+  byId('sidebar-status-text').textContent = !state.serviceAvailable ? '本地服务未连接'
+    : state.loginRunning ? '等待扫码登录' : state.connected ? '1688 会话已连接' : '等待连接 1688';
+  byId('sidebar-status-dot').className = `status-light${state.connected ? ' connected' : state.loginRunning ? '' : ' disconnected'}`;
 }
 
 function scheduleLoginPoll() {
@@ -297,6 +405,13 @@ function productSales(offer) {
   return demand.orderCountText ?? offer?.turnover ?? (demand.orderCount != null ? `${demand.orderCount} 单` : '暂无销量线索');
 }
 
+function salesSource(offer) {
+  const field = offer.demand?.orderCountSource;
+  if (field) return `1688 搜索响应 · ${field}`;
+  if (offer.turnover != null) return '1688 搜索响应 · bookedCount（turnover）';
+  return '上游未提供来源字段';
+}
+
 function productSupplier(offer) {
   const supplier = offer?.supplier?.name ?? offer?.supplierName ?? '供应商信息待查看';
   const city = offer?.location?.city ?? offer?.location?.province ?? '';
@@ -315,29 +430,34 @@ function renderCard(offer, index) {
   const title = offer?.title ?? offer?.subject ?? '未提供商品标题';
   const id = offer?.offerId ?? offer?.id ?? '';
   const url = productUrl(offer);
-  const verified = offer?.verified?.superFactory ? '超级工厂'
-    : offer?.verified?.factory ? '实力工厂'
-      : offer?.verified?.business ? '诚信通商家' : '';
+  const verified = [
+    offer?.verified?.superFactory && '超级工厂线索（superFactory）',
+    offer?.verified?.factory && '验厂线索（factoryInspection）',
+    offer?.verified?.business && '验商线索（businessInspection）',
+  ].filter(Boolean).join(' · ');
   const imageMarkup = image
     ? `<img class="product-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy" referrerpolicy="no-referrer">`
-    : '<span class="image-fallback" aria-label="暂无商品图片">▧</span>';
+    : '<span class="image-fallback" aria-label="暂无商品图片"><svg class="icon"><use href="#i-image"/></svg></span>';
+  const priceText = productPrice(offer).replace(/^[¥￥]\s*/, '');
+  const priceMarkup = /\d/.test(priceText) ? `<small>¥</small>${escapeHtml(priceText)}` : escapeHtml(priceText);
   const salesLabel = escapeHtml(productSales(offer));
-  return `<article class="product-card">
+  return `<article class="product-card${state.selected.has(index) ? ' selected' : ''}">
     <div class="product-image-wrap">
-      ${imageMarkup}
+      ${url ? `<a class="product-image-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" aria-label="查看商品：${escapeHtml(title)}">${imageMarkup}</a>` : imageMarkup}
       <label class="select-product" title="选择导出"><input type="checkbox" data-select-index="${index}" aria-label="选择导出商品 ${index + 1}" ${state.selected.has(index) ? 'checked' : ''}></label>
-      ${verified ? `<span class="product-badge">${escapeHtml(verified)}</span>` : ''}
+      ${verified ? `<span class="product-badge" title="1688 搜索响应标识；资质和有效期请到店铺核验">${escapeHtml(verified)}</span>` : ''}
     </div>
     <div class="product-content">
       <h3 class="product-title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
       <div class="product-supplier"><span class="supplier-dot"></span><span>${escapeHtml(productSupplier(offer))}</span></div>
       <div class="product-metrics">
-        <span class="product-price">${escapeHtml(productPrice(offer))}<small>¥</small></span>
-        <span class="product-sales">销量线索&nbsp; ${salesLabel}</span>
+        <span class="product-price">${priceMarkup}</span>
+        <span class="product-sales" title="${escapeHtml(salesSource(offer))}；周期：${escapeHtml(offer.demand?.orderCountPeriod || '上游未提供')}；不等同于售出件数">销量线索&nbsp; ${salesLabel}</span>
       </div>
+      <button class="text-button detail-button" type="button" data-detail-index="${index}">查看起订量 / SKU / 阶梯价</button>
       <div class="product-footer">
         <span class="product-id">${id ? `ID ${escapeHtml(id)}` : '1688 商品'}</span>
-        ${url ? `<a class="open-product" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">查看商品 <span aria-hidden="true">↗</span></a>` : '<span class="product-id">暂无商品链接</span>'}
+        ${url ? `<a class="open-product" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">查看货源<svg class="icon"><use href="#i-external"/></svg></a>` : '<span class="product-id">暂无商品链接</span>'}
       </div>
     </div>
   </article>`;
@@ -346,18 +466,24 @@ function renderCard(offer, index) {
 function renderResults() {
   const offers = state.offers;
   const total = offers.length;
-  byId('result-count').textContent = total ? String(total) : '';
-  resultsGrid.hidden = total === 0;
-  emptyState.hidden = total > 0;
-  exportButton.disabled = total === 0;
+  byId('result-count').textContent = String(total);
+  resultsGrid.hidden = state.busy || total === 0;
+  emptyState.hidden = state.busy || total > 0;
+  exportButton.disabled = state.busy || total === 0;
+  byId('selection-tools').hidden = total === 0;
   if (total) {
     resultsGrid.innerHTML = offers.map(renderCard).join('');
-    byId('result-summary').textContent = state.searchLabel || `已获取 ${total} 件商品`;
+    renderResultSummary();
+    resultsGrid.querySelectorAll('[data-detail-index]').forEach((button) => {
+      button.disabled = state.busy;
+      button.addEventListener('click', () => loadDetails([offers[Number(button.dataset.detailIndex)]]));
+    });
     resultsGrid.querySelectorAll('[data-select-index]').forEach((input) => {
       input.addEventListener('change', () => {
         const index = Number(input.dataset.selectIndex);
         if (input.checked) state.selected.add(index);
         else state.selected.delete(index);
+        updateSelectionUi();
       });
     });
     resultsGrid.querySelectorAll('.product-image').forEach((image) => {
@@ -365,11 +491,37 @@ function renderResults() {
         const fallback = document.createElement('span');
         fallback.className = 'image-fallback';
         fallback.setAttribute('aria-label', '图片加载失败');
-        fallback.textContent = '▧';
+        fallback.innerHTML = '<svg class="icon"><use href="#i-image"/></svg>';
         image.replaceWith(fallback);
       }, { once: true });
     });
   }
+  updateSelectionUi();
+}
+
+function updateSelectionUi() {
+  const total = state.offers.length;
+  const count = state.selected.size;
+  byId('selection-summary').textContent = `已选 ${count} 件`;
+  byId('select-all').checked = total > 0 && count === total;
+  byId('select-all').indeterminate = count > 0 && count < total;
+  byId('export-label').textContent = count ? `导出已选 Excel (${count}，含图片)` : '导出 Excel（含图片）';
+  byId('compare-button').disabled = state.busy || count === 0 || count > 5;
+  resultsGrid.querySelectorAll('[data-select-index]').forEach((input) => {
+    const selected = state.selected.has(Number(input.dataset.selectIndex));
+    input.checked = selected;
+    input.closest('.product-card').classList.toggle('selected', selected);
+  });
+}
+
+function setResultView(view) {
+  state.resultView = view === 'list' ? 'list' : 'grid';
+  resultsGrid.classList.toggle('list-view', state.resultView === 'list');
+  document.querySelectorAll('[data-result-view]').forEach((button) => {
+    const active = button.dataset.resultView === state.resultView;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
 }
 
 function handlePayload(payload, label) {
@@ -377,6 +529,8 @@ function handlePayload(payload, label) {
   state.offers = offers;
   state.selected.clear();
   state.searchLabel = label;
+  state.searchFailed = false;
+  byId('comparison-panel').hidden = true;
   if (!offers.length) {
     byId('empty-title').textContent = '暂时没有匹配结果';
     byId('empty-copy').textContent = '换个关键词或图片再试试。';
@@ -391,7 +545,7 @@ function handlePayload(payload, label) {
     }
     byId('empty-title').textContent = modeContent[state.mode].emptyTitle;
     byId('empty-copy').textContent = modeContent[state.mode].emptyCopy;
-    byId('empty-source').textContent = '仅展示 1688 实时返回的数据，不填充示例商品';
+    byId('empty-source').textContent = '商品数据来自 1688 实时搜索';
   }
   renderResults();
 }
@@ -401,24 +555,20 @@ byId('keyword-form').addEventListener('submit', async (event) => {
   if (state.busy) return;
   const keyword = byId('keyword-input').value.trim();
   if (!keyword) return byId('keyword-input').focus();
+  if (!validatePrices()) return;
+  const filters = readKeywordFilters();
+  if (state.mode === 'bestseller') filters.sort = 'best-selling';
+  const label = `${keywordSearchLabel(filters)} · 搜索时间 ${new Date().toLocaleString('zh-CN')}`;
   clearMessage();
-  setBusy(true, 'keyword-button-label', state.mode === 'bestseller' ? '查看畅销结果' : '开始搜索');
+  setBusy(true, 'keyword-button-label', state.mode === 'bestseller' ? '查看畅销结果' : '搜索货源');
   byId('result-summary').textContent = '正在连接 1688 搜索…';
   try {
-    const payload = await postJson('/api/search', {
-      keyword,
-      sort: state.mode === 'bestseller' ? 'best-selling' : byId('sort-select').value,
-      max: Number(byId('max-select').value),
-      priceMin: byId('price-min').value,
-      priceMax: byId('price-max').value,
-      excludeAds: byId('exclude-ads').checked,
-    });
-    handlePayload(payload, `关键词「${keyword}」 · ${byId('sort-select').selectedOptions[0].textContent}`);
+    const payload = await postJson('/api/search', filters);
+    handlePayload(payload, label);
   } catch (error) {
-    showMessage(error.message);
-    byId('result-summary').textContent = '搜索未完成';
+    searchFailed(error);
   } finally {
-    setBusy(false, 'keyword-button-label', state.mode === 'bestseller' ? '查看畅销结果' : '开始搜索');
+    setBusy(false, 'keyword-button-label', state.mode === 'bestseller' ? '查看畅销结果' : '搜索货源');
   }
 });
 
@@ -427,6 +577,7 @@ byId('image-form').addEventListener('submit', async (event) => {
   if (state.busy) return;
   const payload = { max: Number(byId('image-max').value) };
   let label = '';
+  let sourceFile;
   if (state.imageMode === 'file') {
     if (!state.file) {
       showMessage('请先选择一张商品图片。', 'info');
@@ -436,7 +587,7 @@ byId('image-form').addEventListener('submit', async (event) => {
       showMessage('图片不能超过 8 MB。');
       return;
     }
-    payload.imageData = await readAsDataUrl(state.file);
+    sourceFile = state.file;
     label = `图片搜索 · ${state.file.name}`;
   } else {
     const imageUrl = byId('image-url').value.trim();
@@ -446,17 +597,17 @@ byId('image-form').addEventListener('submit', async (event) => {
       return;
     }
     payload.imageUrl = imageUrl;
-    label = '图片搜索 · 图片链接';
+    label = `图片搜索 · ${imageUrl}`;
   }
   clearMessage();
   setBusy(true, 'image-button-label', '以图找同款');
   byId('result-summary').textContent = '正在识别图片并搜索…';
   try {
+    if (sourceFile) payload.imageData = await readAsDataUrl(sourceFile);
     const result = await postJson('/api/image-search', payload);
-    handlePayload(result, label);
+    handlePayload(result, `${label} · 最多 ${payload.max} 件 · 搜索时间 ${new Date().toLocaleString('zh-CN')}`);
   } catch (error) {
-    showMessage(error.message);
-    byId('result-summary').textContent = '图片搜索未完成';
+    searchFailed(error);
   } finally {
     setBusy(false, 'image-button-label', '以图找同款');
   }
@@ -472,15 +623,15 @@ function readAsDataUrl(file) {
 }
 
 function setFile(file) {
-  if (!file) return;
+  if (!file) return false;
   const allowed = ['image/jpeg', 'image/png', 'image/webp'];
   if (!allowed.includes(file.type)) {
     showMessage('图片格式需为 JPEG、PNG 或 WebP。');
-    return;
+    return false;
   }
   if (file.size > 8 * 1024 * 1024) {
     showMessage('图片不能超过 8 MB。');
-    return;
+    return false;
   }
   clearMessage();
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
@@ -490,6 +641,7 @@ function setFile(file) {
   byId('upload-preview').hidden = false;
   byId('upload-title').textContent = file.name;
   byId('upload-caption').textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB · 点击可更换`;
+  return true;
 }
 
 byId('choose-image').addEventListener('click', () => byId('image-file').click());
@@ -508,29 +660,116 @@ uploadZone.addEventListener('drop', (event) => {
   setFile(event.dataTransfer.files?.[0]);
 });
 
+document.addEventListener('paste', (event) => {
+  if (state.mode !== 'image' || state.imageMode !== 'file' || uploadZone.hidden || state.busy) return;
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+  const item = Array.from(clipboard.items ?? []).find((entry) => entry.kind === 'file' && entry.type.startsWith('image/'));
+  const file = item?.getAsFile() ?? Array.from(clipboard.files ?? []).find((entry) => entry.type.startsWith('image/'));
+  if (!file) return;
+
+  event.preventDefault();
+  const extension = file.type === 'image/jpeg' ? 'jpg' : file.type.split('/')[1] || 'img';
+  const pastedFile = file.name
+    ? file
+    : new File([file], `剪贴板图片.${extension}`, { type: file.type, lastModified: Date.now() });
+  if (setFile(pastedFile)) showToast('图片已粘贴，可以点击“以图找同款”开始搜索。');
+});
+
 document.querySelectorAll('[data-image-mode]').forEach((button) => {
   button.addEventListener('click', () => {
     state.imageMode = button.dataset.imageMode;
     document.querySelectorAll('[data-image-mode]').forEach((item) => item.classList.toggle('active', item === button));
+    document.querySelectorAll('[data-image-mode]').forEach((item) => {
+      item.setAttribute('aria-selected', String(item === button));
+      item.tabIndex = item === button ? 0 : -1;
+    });
     byId('file-source').hidden = state.imageMode !== 'file';
     byId('url-source').hidden = state.imageMode !== 'url';
     clearMessage();
+  });
+  button.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [...document.querySelectorAll('[data-image-mode]')];
+    const index = tabs.indexOf(button);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+      : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[next].click();
+    tabs[next].focus();
   });
 });
 
 navItems.forEach((item) => item.addEventListener('click', () => setMode(item.dataset.mode)));
 byId('refresh-status').addEventListener('click', refreshStatus);
 byId('login-button').addEventListener('click', startLoginFromPage);
+byId('notice-login-button').addEventListener('click', () => state.serviceAvailable ? startLoginFromPage() : refreshStatus());
+document.querySelectorAll('[data-keyword]').forEach((button) => button.addEventListener('click', () => {
+  byId('keyword-input').value = button.dataset.keyword;
+  byId('keyword-input').focus();
+}));
+document.querySelectorAll('[data-result-view]').forEach((button) => button.addEventListener('click', () => setResultView(button.dataset.resultView)));
+byId('select-all').addEventListener('change', (event) => {
+  state.selected.clear();
+  if (event.target.checked) state.offers.forEach((_, index) => state.selected.add(index));
+  updateSelectionUi();
+});
+byId('empty-primary').addEventListener('click', () => {
+  if (state.mode === 'image') byId('image-file').click();
+  else {
+    byId('keyword-input').focus();
+    byId('keyword-input').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+});
+byId('empty-secondary').addEventListener('click', () => setMode(state.mode === 'image' ? 'keyword' : 'image'));
 
-function csvCell(value) {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+async function loadDetails(offers) {
+  if (state.busy || offers.length < 1 || offers.length > 5) return;
+  const ids = offers.map((offer) => String(offer.offerId ?? offer.id ?? ''));
+  const labelId = state.mode === 'image' ? 'image-button-label' : 'keyword-button-label';
+  const idle = state.mode === 'image' ? '以图找同款' : state.mode === 'bestseller' ? '查看畅销结果' : '搜索货源';
+  setBusy(true, labelId, idle);
+  clearMessage();
+  try {
+    const payload = await postJson('/api/offer-details', { offerIds: ids });
+    const details = payload.mode === 'batch' ? payload.offers : [payload];
+    ids.forEach((id) => { state.details.delete(id); state.failures.delete(id); });
+    details.forEach((detail) => state.details.set(detail.offerId, detail));
+    (payload.failures ?? []).forEach((failure) => state.failures.set(failure.offerId, failure.message));
+    renderComparison(offers);
+  } catch (error) {
+    showMessage(error.message || '采购信息获取失败。');
+    byId('comparison-panel').hidden = true;
+  } finally {
+    setBusy(false, labelId, idle);
+  }
 }
 
-exportButton.addEventListener('click', () => {
+function renderComparison(offers) {
+  const panel = byId('comparison-panel');
+  const rows = offers.map((offer) => {
+    const id = String(offer.offerId ?? offer.id ?? '');
+    const detail = state.details.get(id);
+    const unit = detail?.unitName ?? '（单位未提供）';
+    const qty = detail?.minOrderQty == null ? '未提供' : `${detail.minOrderQty} ${unit}`;
+    const tiers = detail?.priceTiers?.length ? detail.priceTiers.map((tier) => `${tier.minQty} ${unit}起：¥${tier.price}`).join('；') : '未提供';
+    const skus = detail?.skus?.length ? `<details><summary>${detail.skus.length} 个 SKU（展开）</summary><ul>${detail.skus.map((sku) => `<li>${escapeHtml(sku.specs || sku.skuId)}：${sku.price == null ? '价格未提供' : `¥${escapeHtml(sku.price)}`}；库存 ${escapeHtml(sku.stock ?? '未提供')}</li>`).join('')}</ul></details>` : '未提供';
+    const error = state.failures.get(id) || '详情未返回';
+    return `<tr><th scope="row">${escapeHtml(detail?.title || offer.title || id)}<br><small>ID ${escapeHtml(id)}</small></th>${detail ? `<td>${escapeHtml(qty)}</td><td>${escapeHtml(detail.mixOrderQty ?? '未提供')}</td><td>${escapeHtml(tiers)}</td><td>${skus}</td>` : `<td colspan="4">${escapeHtml(error)}</td>`}</tr>`;
+  });
+  panel.innerHTML = `<h3>采购信息比较</h3><p>来自本次 1688 商品详情；未提供的字段不作推断，成交价和库存以商品页面为准。</p><div class="comparison-scroll"><table><thead><tr><th>商品</th><th>起订量</th><th>混批起订量</th><th>阶梯价</th><th>SKU / 价格 / 库存</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  panel.hidden = false;
+}
+
+byId('compare-button').addEventListener('click', () => loadDetails(state.offers.filter((_, index) => state.selected.has(index))));
+['price-min', 'price-max'].forEach((id) => byId(id).addEventListener('input', validatePrices));
+
+exportButton.addEventListener('click', async () => {
+  if (exportButton.disabled) return;
   const picked = state.selected.size
     ? state.offers.filter((_, index) => state.selected.has(index))
     : state.offers;
-  const header = ['offerId', 'title', 'price', 'supplier', 'province', 'city', 'salesSignal', 'repurchaseRate', 'imageUrl', 'productUrl'];
+  const source = `${state.searchFailed ? '上一次成功搜索的结果；最近一次搜索未完成。' : ''}${state.searchLabel}`;
   const rows = picked.map((offer) => [
     offer.offerId ?? offer.id ?? '',
     offer.title ?? offer.subject ?? '',
@@ -542,24 +781,47 @@ exportButton.addEventListener('click', () => {
     offer.demand?.repurchaseRateText ?? offer.demand?.repurchaseRate ?? '',
     offer.image ?? offer.imageUrl ?? '',
     productUrl(offer),
+    salesSource(offer),
+    offer.demand?.orderCountPeriod || '上游未提供统计周期',
   ]);
-  const csv = `\ufeff${[header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')}`;
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  const date = new Date().toISOString().slice(0, 10);
-  link.href = href;
-  link.download = `1688-products-${date}.csv`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(href);
-  showToast(`已导出 ${picked.length} 件商品；CSV 包含主图链接。`);
+  {
+    exportButton.disabled = true;
+    byId('export-label').textContent = '正在导出…';
+    try {
+      const response = await fetch('/api/export-products', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rows: rows.map((row) => ['', ...row].map((value) => String(value ?? ''))), source }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.message || '导出失败，请重试。');
+      }
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = `1688-products-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+      const missing = Number(response.headers.get('x-missing-images')) || 0;
+      showToast(missing ? `已导出 ${picked.length} 件商品，其中 ${missing} 张图片加载失败。` : `已导出 ${picked.length} 件商品。`);
+    } catch (error) {
+      showMessage(error.message || '导出失败，请重试。');
+    } finally {
+      exportButton.disabled = state.busy || !state.offers.length;
+      updateSelectionUi();
+    }
+    return;
+  }
 });
 
 document.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
+    if (state.busy) return;
     setMode('keyword');
     byId('keyword-input').focus();
   }

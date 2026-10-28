@@ -52,6 +52,33 @@ npm i -g 1688-cli
 1688 seller messages <orderId>                                # read seller's reply
 ```
 
+### Local browser workbench
+
+After installing the npm package, run `1688-ui` and open
+`http://127.0.0.1:4173`. From a source checkout, run `pnpm build` then `pnpm ui`.
+The package includes the web assets and Excel export helpers.
+
+The workbench uses the CLI's default profile at `~/.1688` (or `BB1688_HOME`)
+and displays the resolved session directory in the page and terminal. Older
+source versions used the project's `.runtime` directory. To keep using that
+session, set `BB1688_HOME` to its absolute path in both CLI and UI terminals;
+no session data is copied or migrated automatically.
+
+Keyword, image, and best-selling views keep their results and selections
+separately until the page is refreshed. Failed searches label retained results
+with their original query conditions. Keyword search supports price, province,
+city, inspection-signal filters and ad exclusion. Select up to five offers to
+fetch and compare MOQ, price tiers, and SKUs on demand. Inspection flags are
+source-labelled search signals; confirm credentials on the supplier page.
+
+All search modes export Excel with product images (requires recent Excel for
+in-cell pictures), image links, demand-signal source and period, and a query
+provenance sheet. Missing images are marked and counted. Search signals are
+not necessarily sold-unit counts; missing periods are explicitly labelled.
+Best-selling results are sorted keyword results, not a platform-wide ranking.
+The server listens only on loopback. QR login requires an explicit click and
+confirmation; it replaces stored login cookies for the displayed session.
+
 ---
 
 ## Why

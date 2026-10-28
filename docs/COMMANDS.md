@@ -3,6 +3,22 @@
 Commands are organized by buyer journey: sourcing -> inquiry -> cart ->
 checkout -> tracking -> post-sale.
 
+## Local browser workbench
+
+The npm package includes a separate `1688-ui` executable. From source, run
+`pnpm build` then `pnpm ui`. Open `http://127.0.0.1:4173` (override the port
+with `BB1688_UI_PORT`). The workbench uses the CLI's default profile and home
+(`~/.1688` or `BB1688_HOME`) and shows the resolved path. Older `.runtime`
+sessions require explicitly setting `BB1688_HOME` in both terminals.
+
+Read-only workflows: keyword/image/best-selling search, price/province/city/
+inspection-signal/ad filters, selection, and Excel image exports. Results,
+selection and query provenance are retained per mode until page refresh.
+Failures clearly mark older results; exports preserve their original query.
+On-demand details support MOQ, price tiers and SKU comparison for up to five
+selected offers. QR login remains an explicit user-confirmed action. This UI
+does not add seller messaging, cart or checkout actions.
+
 ## Sourcing
 
 ```bash

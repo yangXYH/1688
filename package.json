@@ -36,10 +36,15 @@
   ],
   "type": "module",
   "bin": {
-    "1688": "dist/cli.js"
+    "1688": "dist/cli.js",
+    "1688-ui": "scripts/web-ui.mjs"
   },
   "files": [
     "dist",
+    "web",
+    "scripts/web-ui.mjs",
+    "scripts/web-export.mjs",
+    "scripts/web-cell-images.mjs",
     "scripts/postinstall.mjs",
     "scripts/fix_bin_mode.mjs",
     "scripts/generate_agent_context.mjs",
@@ -74,7 +79,9 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
+    "exceljs": "^4.4.0",
     "iconv-lite": "^0.7.2",
+    "jszip": "^3.10.2",
     "playwright": "^1.48.0",
     "playwright-extra": "^4.3.6",
     "proper-lockfile": "^4.1.2",

@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -35,6 +36,27 @@ if (!pkg.files?.includes('CHANGELOG.md')) {
 
 if (!pkg.scripts?.['release-check']) {
   failures.push('package.json missing script: release-check.');
+}
+
+// Inspect npm's actual archive selection so web dependencies cannot silently
+// disappear when the files allowlist or ignore rules change.
+const packed = spawnSync(process.platform === 'win32' ? 'npm.cmd pack --dry-run --json --ignore-scripts' : 'npm',
+  process.platform === 'win32' ? [] : ['pack', '--dry-run', '--json', '--ignore-scripts'],
+  { cwd: root, encoding: 'utf8', shell: process.platform === 'win32', windowsHide: true, timeout: 30000 });
+if (packed.error || packed.status !== 0) {
+  failures.push(`npm pack check failed: ${packed.error?.message || packed.stderr}`);
+} else {
+  try {
+    const paths = new Set(JSON.parse(packed.stdout)[0].files.map((file) => file.path));
+    for (const file of ['web/index.html', 'web/app.js', 'web/style.css', 'scripts/web-ui.mjs', 'scripts/web-export.mjs', 'scripts/web-cell-images.mjs']) {
+      if (!paths.has(file)) failures.push(`npm archive missing workbench file: ${file}.`);
+    }
+  } catch (error) {
+    failures.push(`Could not read npm pack file list: ${error.message}`);
+  }
+}
+if (pkg.bin?.['1688-ui'] !== 'scripts/web-ui.mjs') {
+  failures.push('package.json missing runnable 1688-ui bin.');
 }
 
 const npmReadmeCandidates = rootFiles

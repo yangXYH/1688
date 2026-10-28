@@ -73,6 +73,22 @@ describe('parseOfferItemsFromMtopText', () => {
 });
 
 describe('mapOffer', () => {
+  it('preserves inspection field provenance without claiming a membership credential', () => {
+    const offer = mapOffer({ data: { offerId: '1', factoryInspection: 'true', businessInspection: 'true', bookedCount: '100+' } });
+    expect(offer?.verificationSource).toEqual({ endpoint: SEARCH_MTOP_API, factory: 'factoryInspection', business: 'businessInspection', superFactory: 'superFactory' });
+    expect(offer?.demand).toMatchObject({ orderCountText: '100+', orderCountSource: 'bookedCount', orderCountPeriod: null });
+  });
+
+  it.each([
+    [{ orderCountText: '100单', orderCount: 100, bookedCount: '200' }, 'orderCountText'],
+    [{ orderCount: 100, bookedCount: '200' }, 'bookedCount'],
+    [{ orderCount: 100 }, 'orderCount'],
+    [{ orderCount: '100单', bookedCount: '200' }, 'orderCount'],
+    [{}, null],
+  ])('reports the actual demand display source and does not invent a period', (fields, source) => {
+    expect(mapOffer({ data: { offerId: '1', ...fields } })?.demand).toMatchObject({ orderCountSource: source, orderCountPeriod: null });
+  });
+
   it('returns null when offerId is missing', () => {
     expect(mapOffer({ data: { title: 'missing id' } })).toBeNull();
   });

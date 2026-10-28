@@ -1,0 +1,63 @@
+import ExcelJS from 'exceljs';
+import { embedCellImages } from './web-cell-images.mjs';
+
+const HEADERS = ['图片', '商品编号', '商品标题', '价格', '供应商', '省份', '城市', '销量线索', '复购率', '图片链接', '商品链接', '销量线索来源', '统计周期'];
+
+async function downloadImage(value) {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+      !['alicdn.com', '1688.com'].some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) return null;
+  try {
+    const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    if (!response.ok || !response.body) return null;
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > 8 * 1024 * 1024) { await response.body.cancel().catch(() => {}); return null; }
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+    const extension = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff ? 'jpeg'
+      : buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'png' : null;
+    return extension ? { buffer, extension } : null;
+  } catch { return null; }
+}
+
+export async function createProductWorkbook(rows, imageLoader = downloadImage, context = {}) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('商品');
+  sheet.addRow(HEADERS);
+  sheet.getRow(1).font = { bold: true };
+  sheet.columns = [14, 20, 48, 18, 28, 14, 14, 18, 14, 50, 50, 60, 24].map((width) => ({ width }));
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  const source = workbook.addWorksheet('搜索来源');
+  source.columns = [{ width: 20 }, { width: 100 }];
+  source.addRow(['结果来源与条件', String(context.source ?? '未提供')]);
+  source.addRow(['导出时间', new Date().toISOString()]);
+  source.addRow(['数据说明', '销量线索可能为订单数或 bookedCount，不能直接等同于售出件数；未提供统计周期时请勿推断。']);
+  source.addRow(['图片说明', '单元格图片需新版 Excel 支持；图片链接保留在商品表。']);
+  let missingImages = 0;
+  const cellImages = [];
+  // Limit concurrent image requests to avoid flooding the image host.
+  for (let start = 0; start < rows.length; start += 5) {
+    const batch = rows.slice(start, start + 5);
+    const images = await Promise.all(batch.map((row) => imageLoader(row[9])));
+    for (let i = 0; i < batch.length; i++) {
+      const row = sheet.addRow(batch[i].map((value) => String(value ?? '')));
+      row.height = 75;
+      row.alignment = { vertical: 'middle', wrapText: true };
+      if (images[i]) {
+        row.getCell(1).value = '图片';
+        cellImages.push({ ...images[i], row: row.number });
+      } else if (batch[i][9]) {
+        missingImages++;
+        row.getCell(1).value = '图片加载失败';
+      } else {
+        row.getCell(1).value = '暂无图片';
+      }
+    }
+  }
+  return { buffer: await embedCellImages(Buffer.from(await workbook.xlsx.writeBuffer()), cellImages), missingImages };
+}

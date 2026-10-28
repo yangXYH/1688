@@ -37,6 +37,19 @@ Overall: 6 / 10
 
 ## Last Known Verification Snapshot
 
+On 2026-10-28, `pnpm agent-verify` passed after the local web review fixes:
+typecheck, 33 deterministic test suites, docs freshness, agent map, and release
+metadata checks. The release check now inspects npm's actual dry-run file list
+for the workbench assets and helpers. The bin helper's CRLF-sensitive import
+and Windows-incompatible POSIX permission assertion were corrected.
+
+The built tarball was extracted and its web entry served HTML/JS/CSS and
+validated invalid prices. Ego-browser checks with isolated fixture CLI data
+covered retained results/selections, failed-query provenance, detail comparison,
+keyword/image Excel downloads, and 320–1440 px layouts. Workbook contents were
+read back; embedded image XML remains covered by deterministic tests. These
+checks do not establish live 1688 image-search or authentication availability.
+
 On 2026-05-28, `pnpm agent-verify` passed:
 
 - `pnpm typecheck`

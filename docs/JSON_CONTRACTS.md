@@ -125,12 +125,15 @@ the matching profile-scoped daemon status.
     location: { province: string | null, city: string | null },
     bizType: string | null,
     verified: { factory: boolean, business: boolean, superFactory: boolean },
+    verificationSource?: { endpoint: string, factory: string, business: string, superFactory: string },
     tags: string[],
     serviceTags?: string[],
     productBadges?: string[],
     demand?: {
       orderCountText: string | null,
       orderCount: number | null,
+      orderCountSource?: string | null,
+      orderCountPeriod?: string | null,
       repurchaseRateText: string | null,
       repurchaseRate: number | null,
     },
@@ -141,6 +144,15 @@ the matching profile-scoped daemon status.
   }>
 }
 ```
+
+`verified` remains compatible: `factory` maps only to `factoryInspection`,
+`business` to `businessInspection`, and `superFactory` to `superFactory` in the
+search response. Optional `verificationSource` names these fields and their
+endpoint; the flags do not independently establish a membership credential.
+`demand.orderCountSource` names the field used for the displayed signal
+(`orderCountText`, `orderCount`, or `bookedCount`). `orderCountPeriod` is null
+when the payload does not provide a known period. Signals are not necessarily
+sold-unit counts. Consumers must tolerate absent provenance on other parsers.
 
 `search --deeppro` keeps the normal `search` fields and adds:
 

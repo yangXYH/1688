@@ -5,11 +5,13 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createProductWorkbook } from './web-export.mjs';
+import { root as sessionRoot } from '../dist/session/paths.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web');
 const CLI = path.join(ROOT, 'dist', 'cli.js');
-const RUNTIME = path.resolve(process.env.BB1688_HOME ?? path.join(ROOT, '.runtime'));
+const RUNTIME = path.resolve(sessionRoot());
 const UPLOADS = path.join(RUNTIME, 'ui-uploads');
 const LOGIN_QR = path.join(RUNTIME, 'login-qr.png');
 const HOST = '127.0.0.1';
@@ -19,7 +21,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const LOGIN_TIMEOUT_MS = 330_000;
 
 let cliQueue = Promise.resolve();
-let lastStatus = { connected: false, daemonRunning: false, checkedAt: null };
+let lastStatus = { connected: false, daemonRunning: false, checkedAt: null, sessionPath: RUNTIME };
 let loginFlow = {
   state: 'idle',
   message: '',
@@ -272,7 +274,8 @@ function errorMessage(error) {
 }
 
 function assertLocalRequest(req) {
-  const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+  const port = server.address()?.port ?? PORT;
+  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
   const host = String(req.headers.host ?? '').toLowerCase();
   if (!allowedHosts.has(host)) throw Object.assign(new Error('只允许本机访问。'), { status: 403 });
 
@@ -323,6 +326,14 @@ function optionalPrice(value, flag, args) {
 function appendSearchFilters(body, args) {
   optionalPrice(body.priceMin, '--price-min', args);
   optionalPrice(body.priceMax, '--price-max', args);
+  if (body.priceMin !== '' && body.priceMin != null && body.priceMax !== '' && body.priceMax != null && Number(body.priceMin) > Number(body.priceMax)) {
+    throw Object.assign(new Error('最低价不能高于最高价。'), { status: 400 });
+  }
+  for (const field of ['province', 'city']) {
+    const value = String(body[field] ?? '').trim();
+    if (value.length > 30) throw Object.assign(new Error('地区名称不能超过 30 个字符。'), { status: 400 });
+    if (value) args.push(`--${field}`, value);
+  }
   if (body.verified && ['factory', 'business', 'super-factory'].includes(body.verified)) {
     args.push('--verified', body.verified);
   }
@@ -374,7 +385,7 @@ function sendStatic(res, filename) {
       'content-type': types[filename],
       'content-length': body.length,
       'cache-control': 'no-cache',
-      'content-security-policy': "default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      'content-security-policy': "default-src 'self'; img-src 'self' https: data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
       'referrer-policy': 'no-referrer',
       'x-content-type-options': 'nosniff',
       'x-frame-options': 'DENY',
@@ -400,7 +411,7 @@ const server = createServer(async (req, res) => {
       if (loginFlow.state === 'starting' || loginFlow.state === 'waiting') {
         return sendJson(res, 200, { ...lastStatus, connected: false, login: loginSnapshot() });
       }
-      return serializeCli(async () => {
+      return await serializeCli(async () => {
         if (loginSnapshot().running) {
           return sendJson(res, 200, { ...lastStatus, connected: false, login: loginSnapshot() });
         }
@@ -408,6 +419,7 @@ const server = createServer(async (req, res) => {
           const who = parseCliJson(await runCli(['whoami', '--json']));
           const daemon = parseCliJson(await runCli(['daemon', 'status', '--json']));
           lastStatus = {
+            sessionPath: RUNTIME,
             connected: who.loggedIn === true,
             daemonRunning: daemon.running === true && daemon.reachable === true,
             checkedAt: new Date().toISOString(),
@@ -439,12 +451,41 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/login') {
-      return serializeCli(async () => {
+      return await serializeCli(async () => {
         if (loginFlow.state === 'starting' || loginFlow.state === 'waiting') {
           return sendJson(res, 200, loginSnapshot());
         }
         await startLoginFlow();
         return sendJson(res, loginSnapshot().running ? 202 : 500, loginSnapshot());
+      });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/export-products') {
+      const body = await readJson(req);
+      if (!Array.isArray(body.rows) || body.rows.length < 1 || body.rows.length > 50 ||
+          body.rows.some((row) => !Array.isArray(row) || row.length !== 13 || row.some((value) => typeof value !== 'string' || value.length > 10000)) ||
+          typeof body.source !== 'string' || body.source.length > 2000) {
+        throw Object.assign(new Error('导出数据无效。'), { status: 400 });
+      }
+      const { buffer, missingImages } = await createProductWorkbook(body.rows, undefined, { source: body.source });
+      res.writeHead(200, {
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-length': buffer.length,
+        'cache-control': 'no-store',
+        'x-missing-images': String(missingImages),
+      });
+      return res.end(buffer);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/offer-details') {
+      const body = await readJson(req);
+      if (!Array.isArray(body.offerIds) || body.offerIds.length < 1 || body.offerIds.length > 5 ||
+          body.offerIds.some((id) => typeof id !== 'string' || !/^\d{1,30}$/.test(id))) {
+        throw Object.assign(new Error('请选择 1 到 5 件商品查看采购信息。'), { status: 400 });
+      }
+      return await serializeCli(async () => {
+        assertLoginNotRunning();
+        return sendJson(res, 200, parseCliJson(await runCli(['offer', ...new Set(body.offerIds), '--json'])));
       });
     }
 
@@ -455,7 +496,7 @@ const server = createServer(async (req, res) => {
       const sort = ['relevance', 'best-selling', 'price-asc', 'price-desc'].includes(body.sort) ? body.sort : 'relevance';
       const args = ['search', keyword, '--max', String(boundedInt(body.max, 20, 1, 50)), '--sort', sort, '--json', '--pretty'];
       appendSearchFilters(body, args);
-      return serializeCli(async () => {
+      return await serializeCli(async () => {
         assertLoginNotRunning();
         const data = parseCliJson(await runCli(args));
         return sendJson(res, 200, data);
@@ -465,7 +506,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/image-search') {
       const body = await readJson(req);
       const max = boundedInt(body.max, 20, 1, 50);
-      return serializeCli(async () => {
+      return await serializeCli(async () => {
         assertLoginNotRunning();
         let uploadedPath;
         try {
@@ -497,7 +538,8 @@ server.on('error', (error) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`1688 本地操作台已启动：http://${HOST}:${PORT}`);
+  console.log(`1688 本地操作台已启动：http://${HOST}:${server.address().port}`);
+  console.log(`当前会话目录：${RUNTIME}`);
   console.log('服务仅监听本机回环地址。按 Ctrl+C 停止。');
 });
 

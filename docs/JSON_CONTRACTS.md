@@ -117,6 +117,12 @@ the matching profile-scoped daemon status.
   filters?: object,
   totalBeforeFilter?: number,
   total: number,
+  pagination?: {
+    requestedMax: number,
+    pagesFetched: number,
+    stopReason: "limit_reached" | "end_of_results" | "next_page_unavailable" |
+      "next_page_failed" | "capture_timeout" | "no_new_offers" | "page_limit",
+  },
   offers: Array<{
     offerId: string,
     title: string,
@@ -144,6 +150,14 @@ the matching profile-scoped daemon status.
   }>
 }
 ```
+
+Keyword `search` adds optional `pagination` metadata. `pagesFetched` counts
+successfully captured pages; `requestedMax` is the buyer's result limit. A
+missing/unclickable next control or a capture timeout returns collected offers
+with its specific stop reason, rather than claiming the platform has no more
+results. Later-page login/risk challenges use the existing exit 3/4 errors.
+Repeated offers are deduplicated; collection can continue beyond the nominal
+page count, bounded by twice that count and an absolute 34 pages.
 
 `verified` remains compatible: `factory` maps only to `factoryInspection`,
 `business` to `businessInspection`, and `superFactory` to `superFactory` in the

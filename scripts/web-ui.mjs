@@ -19,6 +19,8 @@ const PORT = Number(process.env.BB1688_UI_PORT ?? 4173);
 const MAX_BODY = 12 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const LOGIN_TIMEOUT_MS = 330_000;
+const EXPORT_SCHEMA_VERSION = 2;
+const MAX_RESULTS = 1000;
 
 let cliQueue = Promise.resolve();
 let lastStatus = { connected: false, daemonRunning: false, checkedAt: null, sessionPath: RUNTIME };
@@ -36,7 +38,7 @@ function serializeCli(task) {
   return run;
 }
 
-function runCli(args) {
+function runCli(args, timeoutMs = 180_000) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: ROOT,
@@ -57,7 +59,7 @@ function runCli(args) {
     const timeout = setTimeout(() => {
       child.kill();
       finish(new Error('采集命令超时，请稍后重试。'));
-    }, 180_000);
+    }, timeoutMs);
 
     function finish(error, result) {
       if (settled) return;
@@ -398,7 +400,7 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? `${HOST}:${PORT}`}`);
     if (req.method === 'GET' && url.pathname === '/api/health') {
-      return sendJson(res, 200, { ok: true });
+      return sendJson(res, 200, { ok: true, exportSchemaVersion: EXPORT_SCHEMA_VERSION });
     }
 
     assertLocalRequest(req);
@@ -462,7 +464,10 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/export-products') {
       const body = await readJson(req);
-      if (!Array.isArray(body.rows) || body.rows.length < 1 || body.rows.length > 50 ||
+      if (body.schemaVersion !== undefined && body.schemaVersion !== EXPORT_SCHEMA_VERSION) {
+        throw Object.assign(new Error('页面与本地服务的导出版本不一致，请更新并重启操作台后重试。'), { status: 409 });
+      }
+      if (!Array.isArray(body.rows) || body.rows.length < 1 || body.rows.length > MAX_RESULTS ||
           body.rows.some((row) => !Array.isArray(row) || row.length !== 13 || row.some((value) => typeof value !== 'string' || value.length > 10000)) ||
           typeof body.source !== 'string' || body.source.length > 2000) {
         throw Object.assign(new Error('导出数据无效。'), { status: 400 });
@@ -494,18 +499,19 @@ const server = createServer(async (req, res) => {
       const keyword = String(body.keyword ?? '').trim();
       if (!keyword || keyword.length > 100) throw Object.assign(new Error('请输入 1 到 100 个字符的关键词。'), { status: 400 });
       const sort = ['relevance', 'best-selling', 'price-asc', 'price-desc'].includes(body.sort) ? body.sort : 'relevance';
-      const args = ['search', keyword, '--max', String(boundedInt(body.max, 20, 1, 50)), '--sort', sort, '--json', '--pretty'];
+      const max = boundedInt(body.max, 20, 1, MAX_RESULTS);
+      const args = ['search', keyword, '--max', String(max), '--sort', sort, '--json', '--pretty'];
       appendSearchFilters(body, args);
       return await serializeCli(async () => {
         assertLoginNotRunning();
-        const data = parseCliJson(await runCli(args));
+        const data = parseCliJson(await runCli(args, max > 50 ? 330_000 : 180_000));
         return sendJson(res, 200, data);
       });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/image-search') {
       const body = await readJson(req);
-      const max = boundedInt(body.max, 20, 1, 50);
+      const max = boundedInt(body.max, 20, 1, MAX_RESULTS);
       return await serializeCli(async () => {
         assertLoginNotRunning();
         let uploadedPath;

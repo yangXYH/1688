@@ -2,6 +2,14 @@ import ExcelJS from 'exceljs';
 import { embedCellImages } from './web-cell-images.mjs';
 
 const HEADERS = ['图片', '商品编号', '商品标题', '价格', '供应商', '省份', '城市', '销量线索', '复购率', '图片链接', '商品链接', '销量线索来源', '统计周期'];
+const WIDTHS = [14, 20, 48, 18, 28, 14, 14, 18, 14, 50, 50, 60, 24];
+const EMPTY_VALUES = new Set(['', '暂无销量线索', '价格待查看', '供应商信息待查看', '上游未提供', '上游未提供来源字段', '上游未提供统计周期']);
+
+function populatedColumn(rows, index) {
+  // Keep the first column as the in-cell image anchor. Other columns only
+  // appear when at least one selected product has actual data, including 0.
+  return index === 0 || rows.some((row) => !EMPTY_VALUES.has(String(row[index] ?? '').trim()));
+}
 
 async function downloadImage(value) {
   let url;
@@ -28,9 +36,10 @@ async function downloadImage(value) {
 export async function createProductWorkbook(rows, imageLoader = downloadImage, context = {}) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('商品');
-  sheet.addRow(HEADERS);
+  const columns = HEADERS.map((_, index) => index).filter((index) => populatedColumn(rows, index));
+  sheet.addRow(columns.map((index) => HEADERS[index]));
   sheet.getRow(1).font = { bold: true };
-  sheet.columns = [14, 20, 48, 18, 28, 14, 14, 18, 14, 50, 50, 60, 24].map((width) => ({ width }));
+  sheet.columns = columns.map((index) => ({ width: WIDTHS[index] }));
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
   const source = workbook.addWorksheet('搜索来源');
   source.columns = [{ width: 20 }, { width: 100 }];
@@ -45,7 +54,7 @@ export async function createProductWorkbook(rows, imageLoader = downloadImage, c
     const batch = rows.slice(start, start + 5);
     const images = await Promise.all(batch.map((row) => imageLoader(row[9])));
     for (let i = 0; i < batch.length; i++) {
-      const row = sheet.addRow(batch[i].map((value) => String(value ?? '')));
+      const row = sheet.addRow(columns.map((index) => String(batch[i][index] ?? '')));
       row.height = 75;
       row.alignment = { vertical: 'middle', wrapText: true };
       if (images[i]) {

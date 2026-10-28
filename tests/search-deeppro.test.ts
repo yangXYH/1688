@@ -41,6 +41,14 @@ afterEach(() => {
   setOutputFlags({ json: false, jsonV2: false, pretty: false });
 });
 
+describe('search result limit', () => {
+  it.each([100, 500, 1000])('allows --max %i without the old 600-result clamp', async (max) => {
+    dispatchMock.mockResolvedValueOnce({ keyword: '杯', total: 0, offers: [] });
+    await run('杯', { max: String(max) });
+    expect(dispatchMock).toHaveBeenCalledWith('search', expect.objectContaining({ max }), expect.anything());
+  });
+});
+
 describe('search --deeppro', () => {
   it('runs search and detail collection inline and adds a deeppro summary', async () => {
     dispatchMock

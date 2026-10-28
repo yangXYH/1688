@@ -61,6 +61,29 @@ behavior, selectors, and mtop payloads. They are not stable automated tests.
 
 Stable behavior belongs in `tests/` with fixtures where possible.
 
+## Local Workbench Updates
+
+Keyword pagination must stay in the same page/search context. The current
+pagination region (`data-spm="pagination"`) uses CSS-module classes such as
+`nextArrow--<hash>` and `arrowDisabled--<hash>`; do not match the generated hash.
+Keep the legacy `.fui-next` fallback and exclude disabled arrows. Missing or
+unclickable controls must be reported as a pagination stop, not a claim that
+the platform has exhausted results. Later-page login and verification errors
+still require the normal manual recovery, without silent retries.
+
+The local server reads static web assets from disk on each request, but loads
+its API and Excel helpers when the Node process starts. After updating source
+or installing a newer package, restart the web server as well as rebuilding
+the CLI when needed. Keep the same `BB1688_HOME` override to retain the active
+session; older source workbenches defaulted to the project's `.runtime`.
+
+`GET /api/health` reports `exportSchemaVersion: 2` for the 13-column Excel
+format. Before exporting, the page checks this field. A pre-upgrade process
+without the capability returns an actionable restart message, preserving
+results and selection so export can be retried without refreshing the page.
+The updated API also accepts already-open 13-column pages that omit the
+optional request schema version. Explicit incompatible versions return 409.
+
 ## Live-Service Boundaries
 
 `pnpm test:unit` is the deterministic default. `pnpm test` also runs live

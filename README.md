@@ -71,10 +71,18 @@ city, inspection-signal filters and ad exclusion. Select up to five offers to
 fetch and compare MOQ, price tiers, and SKUs on demand. Inspection flags are
 source-labelled search signals; confirm credentials on the supplier page.
 
+All three views offer upper limits of 20, 30, 50, 100, 500 and 1000 results,
+and Excel exports accept up to 1000 rows. Keyword search paginates normally;
+image search uses the platform's single response and may return fewer items.
+The page reports the actual result count.
+
 All search modes export Excel with product images (requires recent Excel for
-in-cell pictures), image links, demand-signal source and period, and a query
+in-cell pictures), image links, available demand-signal source/period, and a query
 provenance sheet. Missing images are marked and counted. Search signals are
 not necessarily sold-unit counts; missing periods are explicitly labelled.
+Entirely empty or unavailable-only fields are omitted from the product table;
+partially populated fields and real zero values remain. Period limitations are
+explained in the provenance sheet when no period column has data.
 Best-selling results are sorted keyword results, not a platform-wide ranking.
 The server listens only on loopback. QR login requires an explicit click and
 confirmation; it replaces stored login cookies for the displayed session.

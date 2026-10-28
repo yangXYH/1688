@@ -80,7 +80,15 @@ export interface SearchResult {
   totalBeforeFilter: number;
   total: number;
   offers: Offer[];
+  pagination?: SearchPagination;
   deeppro?: DeepProSummary;
+}
+
+export interface SearchPagination {
+  requestedMax: number;
+  pagesFetched: number;
+  stopReason: 'limit_reached' | 'end_of_results' | 'next_page_unavailable' |
+    'next_page_failed' | 'capture_timeout' | 'no_new_offers' | 'page_limit';
 }
 
 export type { Offer };
@@ -96,15 +104,16 @@ export async function execute(
       const sort = args.sort ?? 'relevance';
       const filters = args.filters ?? normalizeFilters({});
       const fetchMax = hasActiveFilters(filters)
-        ? Math.min(Math.max(args.max * 3, PAGE_SIZE), PAGE_SIZE * MAX_PAGES)
+        ? Math.min(Math.max(args.max * 3, PAGE_SIZE), MAX_RESULTS)
         : args.max;
-      const offers = await fetchSearch(
+      const collection = await fetchSearch(
         ctx,
         args.keyword,
         args.headed === true,
         fetchMax,
         sort,
       );
+      const { offers } = collection;
       const controlled = applySearchControls(offers, sort, filters);
       const slice = controlled.slice(0, args.max);
       return {
@@ -114,6 +123,7 @@ export async function execute(
         totalBeforeFilter: offers.length,
         total: slice.length,
         offers: slice,
+        pagination: { ...collection.pagination, requestedMax: args.max },
       };
     },
     { headed: args.headed === true, maxRetries: 1 },
@@ -125,7 +135,7 @@ export async function run(keyword: string, opts: SearchOpts): Promise<void> {
   if (!kw) {
     throw new CliError(2, 'BAD_INPUT', 'Search keyword is required.');
   }
-  const max = parsePositiveInt(opts.max, '--max', 20, PAGE_SIZE * MAX_PAGES);
+  const max = parsePositiveInt(opts.max, '--max', 20, MAX_RESULTS);
   const sort = normalizeSearchSort(opts.sort);
   const filters = normalizeFilters({
     priceMin: parseOptionalNumber(opts.priceMin, '--price-min'),
@@ -178,10 +188,12 @@ export const SEARCH_WARMUP_URL = 'https://www.1688.com/';
 // clicking the in-page "next" arrow (which keeps the search-context
 // `pageId` stable — see fetchSearch for why that matters). MAX_PAGES caps
 // it: each extra page is another click + mtop round-trip (~3-5s) and a bit
-// more WAF exposure, so we stop at 10 pages (600 results) even if --max
-// asks for more.
+// more WAF exposure. Allow up to 1000 unique requested results, with a bounded
+// two-times page budget for repeated ads/items. Keep normal per-page delays,
+// deduplication, and early stops; stop as soon as enough unique offers exist.
 const PAGE_SIZE = 60;
-const MAX_PAGES = 10;
+const MAX_RESULTS = 1000;
+const MAX_PAGES = Math.ceil(MAX_RESULTS / PAGE_SIZE) * 2;
 
 export { parseMtopJsonp };
 
@@ -193,13 +205,13 @@ async function fetchSearch(
   headed: boolean,
   maxResults: number,
   sort: SearchSort,
-): Promise<Offer[]> {
+): Promise<{ offers: Offer[]; pagination: SearchPagination }> {
   const page = await ctx.newPage();
 
   const baseUrl = buildSearchUrl(keyword, sort);
   const sortType = remoteSortType(sort);
   const pagesWanted = Math.min(
-    Math.max(1, Math.ceil(maxResults / PAGE_SIZE)),
+    Math.max(1, Math.ceil(maxResults / PAGE_SIZE)) * 2,
     MAX_PAGES,
   );
 
@@ -409,6 +421,8 @@ async function fetchSearch(
 
   const allOffers: Offer[] = [];
   const seenIds = new Set<string>();
+  let pagesFetched = 0;
+  let stopReason: SearchPagination['stopReason'] = 'page_limit';
 
   class PageAdvanceStopped extends Error {}
 
@@ -469,8 +483,13 @@ async function fetchSearch(
           // Clicking the in-page "next" arrow advances `beginPage` within the
           // SAME pageId, which is the only way to get a clean next 60.
           info(`Fetching page ${pageNum}/${pagesWanted}...`);
-          const advanced = await clickSearchNextPage(page).catch(() => false);
+          const advanced = await clickSearchNextPage(page).catch((error) => {
+            stopReason = 'next_page_failed';
+            info(`Next-page click failed: ${(error as Error).message}`);
+            return false;
+          });
           if (!advanced) {
+            if (stopReason !== 'next_page_failed') stopReason = 'next_page_unavailable';
             info(`Could not advance to page ${pageNum} — stopping at ${allOffers.length} results.`);
             throw new PageAdvanceStopped();
           }
@@ -506,6 +525,8 @@ async function fetchSearch(
       if (!got) await detectLoginRedirect(page);
     }
     if (!got) {
+      await detectLoginRedirect(page);
+      if (captureResult.status === 'blocked' || isSearchBlocked()) throw riskControlError(headed);
       if (pageNum === 1) {
         throw riskControlError(headed);
       }
@@ -513,9 +534,11 @@ async function fetchSearch(
         `Page ${pageNum} blocked or empty — returning ${allOffers.length} ` +
           `results from ${pageNum - 1} page(s).`,
       );
+      stopReason = 'capture_timeout';
       break;
     }
     if (pageNum === 1) await detectLoginRedirect(page);
+    pagesFetched++;
 
     // Accumulate with cross-page dedup. 1688 occasionally repeats P4P ad
     // slots across pages; dedup keeps the result set clean.
@@ -532,9 +555,9 @@ async function fetchSearch(
     //  - short page (< 60) means we hit the last page of results
     //  - zero new items means pagination isn't advancing (bail rather than
     //    spin through identical pages)
-    if (allOffers.length >= maxResults) break;
-    if (capturedOffers.length < PAGE_SIZE) break;
-    if (added === 0) break;
+    if (allOffers.length >= maxResults) { stopReason = 'limit_reached'; break; }
+    if (capturedOffers.length < PAGE_SIZE) { stopReason = 'end_of_results'; break; }
+    if (added === 0) { stopReason = 'no_new_offers'; break; }
 
     // Human-like jitter between page clicks to keep the WAF score low.
     if (pageNum < pagesWanted) {
@@ -542,7 +565,7 @@ async function fetchSearch(
     }
   }
 
-  return allOffers;
+  return { offers: allOffers, pagination: { requestedMax: maxResults, pagesFetched, stopReason } };
 }
 
 export function buildSearchUrl(keyword: string, sort: SearchSort): string {

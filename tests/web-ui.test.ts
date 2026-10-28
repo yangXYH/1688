@@ -21,6 +21,7 @@ async function workbench() {
   }
   const requests: any[] = [];
   let failSearch = false;
+  let exportSchemaVersion: number | undefined = 2;
   const offer = { offerId: '123', title: '杯子', price: { text: '¥20' }, turnover: '100+', demand: { orderCountText: '100+', orderCountSource: 'bookedCount' }, verified: { factory: true, business: true } };
   const context = vm.createContext({
     document: { getElementById: element, querySelectorAll: () => [], querySelector: element, addEventListener() {}, createElement: element, body: element('body') },
@@ -29,6 +30,7 @@ async function workbench() {
     fetch: async (url: string, options: any) => {
       const body = options?.body ? JSON.parse(options.body) : null;
       requests.push({ url, body });
+      if (url === '/api/health') return { ok: true, json: async () => ({ ok: true, exportSchemaVersion }) };
       if (url === '/api/export-products') return { ok: true, blob: async () => ({}), headers: { get: () => '0' } };
       return { ok: !(failSearch && url === '/api/search'), json: async () => url === '/api/status' ? { connected: false, sessionPath: 'test-home' }
         : failSearch && url === '/api/search' ? { message: '网络中断' } : { offers: [offer], total: 1 } };
@@ -39,11 +41,58 @@ async function workbench() {
     element, requests,
     run: (code: string) => vm.runInContext(code, context),
     fail: () => { failSearch = true; },
+    oldServer: () => { exportSchemaVersion = undefined; },
+    currentServer: () => { exportSchemaVersion = 2; },
     submit: () => element('keyword-form').listeners.submit({ preventDefault() {} }),
   };
 }
 
 describe('workbench buyer regressions', () => {
+  it('shows the actual pagination failure reason for partial results', async () => {
+    const ui = await workbench();
+    ui.run("handlePayload({offers:[{offerId:'123'}],pagination:{pagesFetched:1,stopReason:'next_page_unavailable'}}, '关键词搜索', 1000)");
+    expect(ui.element('message-box').textContent).toContain('未找到可用的下一页按钮');
+    expect(ui.element('message-box').textContent).toContain('已读取 1 页');
+    expect(ui.element('message-box').textContent).not.toContain('实际数量以平台返回');
+  });
+
+  it('submits 1000 as the upper limit for both modes and explains shorter platform results', async () => {
+    const ui = await workbench();
+    ui.element('keyword-input').value = '旅行拉杆箱';
+    ui.element('max-select').value = '1000';
+    await ui.submit();
+    expect(ui.requests.find((request) => request.url === '/api/search').body.max).toBe(1000);
+    expect(ui.element('message-box').textContent).toContain('已返回 1 件');
+    expect(ui.element('message-box').textContent).toContain('最多 1000 件');
+    ui.run("setMode('image'); state.imageMode = 'url'");
+    ui.element('image-url').value = 'https://example.com/cup.png';
+    ui.element('image-max').value = '1000';
+    await ui.element('image-form').listeners.submit({ preventDefault() {} });
+    expect(ui.requests.find((request) => request.url === '/api/image-search').body.max).toBe(1000);
+    ui.run("setMode('keyword')");
+    expect(ui.element('max-select').value).toBe(1000);
+  });
+
+  it('explains a stale running API and preserves the selected results for retry', async () => {
+    const ui = await workbench();
+    ui.element('keyword-input').value = '旅行拉杆箱';
+    await ui.submit();
+    ui.element('select-all').listeners.change({ target: { checked: true } });
+    ui.oldServer();
+    await ui.element('export-button').listeners.click();
+    expect(ui.element('message-box').textContent).toContain('服务版本过旧');
+    expect(ui.element('message-box').textContent).toContain('重新运行 pnpm ui');
+    expect(ui.requests.some((request) => request.url === '/api/export-products')).toBe(false);
+    expect(ui.run('state.offers.length')).toBe(1);
+    expect(ui.run('state.selected.size')).toBe(1);
+    expect(ui.element('export-button').disabled).toBe(false);
+    ui.currentServer();
+    await ui.element('export-button').listeners.click();
+    expect(ui.requests.find((request) => request.url === '/api/export-products').body.schemaVersion).toBe(2);
+    expect(ui.element('message-box').hidden).toBe(true);
+    expect(ui.run('state.selected.size')).toBe(1);
+  });
+
   it('blocks invalid prices immediately without issuing a search', async () => {
     const ui = await workbench();
     ui.element('keyword-input').value = '保温杯';

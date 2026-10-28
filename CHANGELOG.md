@@ -6,6 +6,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Excel exports omit columns whose selected products contain only empty or
+  unavailable values, while retaining partially populated columns and real
+  zero values. In-cell images and query provenance remain available.
+- Keyword search now recognizes 1688's current pagination arrow, so requests
+  beyond 60 offers advance past the first page. Unique-result collection
+  tolerates repeated ads/items with a bounded page budget. JSON/UI report
+  specific pagination stop reasons instead of implying a platform result cap.
+- Detect a stale running workbench API before exporting, with an explicit
+  restart instruction instead of the generic invalid-data error. Preserve
+  selected results for retry and clear prior errors when retrying export.
 - Local workbench retains results, selection and filters per search mode;
   failed requests label previous results with their original query. Invalid
   price ranges are rejected inline and by the local API.
@@ -19,6 +29,9 @@ This project follows [Semantic Versioning](https://semver.org/).
   direct-execution URL check. Permission tests now work on Windows too.
 
 ### Added
+- Workbench result limits of 100, 500 and 1000 alongside 20/30/50. Keyword
+  pagination and Excel export now support up to 1000 results; shorter platform
+  responses are explicitly reported, including single-response image search.
 - Province, city and inspection-signal filters in the local workbench, plus
   on-demand MOQ, tier-price and SKU comparison for up to five selected offers.
 - Consistent Excel exports with in-cell images for all three search modes.

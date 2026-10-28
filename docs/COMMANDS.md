@@ -19,6 +19,24 @@ On-demand details support MOQ, price tiers and SKU comparison for up to five
 selected offers. QR login remains an explicit user-confirmed action. This UI
 does not add seller messaging, cart or checkout actions.
 
+Result-limit choices are 20, 30, 50, 100, 500 and 1000 for all three views.
+These are upper limits, not guaranteed counts. Excel export accepts up to
+1000 rows and omits fields that are empty or contain
+only unavailable placeholders across all selected offers. A column with any
+real value (including zero) is retained. The image column remains first; image
+loading and links are preserved when other columns are omitted. Missing-period
+definitions remain in the search-source worksheet. Keyword search uses normal
+in-page pagination, matching both the
+current CSS-module next-arrow control and the legacy control. It stops once
+enough unique offers exist; repeated ads/items allow additional sequential
+pages, bounded by twice the nominal count and 34 pages, with existing delays
+and early stops. Optional JSON `pagination` identifies the captured page count
+and stop reason. The UI distinguishes a missing/failed next button or timeout
+from the end of results. Image search currently uses the single
+platform result response, so it may return fewer than the selected limit.
+The UI reports the actual count. Requests above 50 allow up to 330 seconds
+for the search subprocess (the daemon call retains its five-minute timeout).
+
 ## Sourcing
 
 ```bash
@@ -40,6 +58,7 @@ does not add seller messaging, cart or checkout actions.
 Research-oriented `search` filters:
 
 ```bash
+--max <n>                         # default 20; maximum 1000
 --sort relevance|best-selling|price-asc|price-desc
 --price-min <n>
 --price-max <n>

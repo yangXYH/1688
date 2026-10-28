@@ -524,7 +524,7 @@ function setResultView(view) {
   });
 }
 
-function handlePayload(payload, label) {
+function handlePayload(payload, label, requestedMax = 0) {
   const offers = normalizeOffers(payload);
   state.offers = offers;
   state.selected.clear();
@@ -540,6 +540,20 @@ function handlePayload(payload, label) {
     const total = Number(payload.total);
     if (Number.isFinite(total) && total > offers.length) {
       showMessage(`当前展示 ${offers.length} 件，本次搜索共返回 ${total} 件。`, 'info');
+    } else if (offers.length < requestedMax) {
+      const reasons = {
+        next_page_unavailable: '未找到可用的下一页按钮',
+        next_page_failed: '下一页按钮点击失败',
+        capture_timeout: '下一页商品读取超时',
+        no_new_offers: '后续页面未返回新的商品',
+        end_of_results: '已读取到平台最后一页',
+        page_limit: '已达到本次翻页上限',
+      };
+      const pagination = payload.pagination;
+      const reason = reasons[pagination?.stopReason];
+      showMessage(reason
+        ? `已返回 ${offers.length} 件（最多 ${requestedMax} 件），已读取 ${pagination.pagesFetched} 页。停止原因：${reason}。`
+        : `已返回 ${offers.length} 件，少于本次设置的最多 ${requestedMax} 件；实际数量以平台返回、筛选及翻页情况为准。`, 'info');
     } else {
       clearMessage();
     }
@@ -564,7 +578,7 @@ byId('keyword-form').addEventListener('submit', async (event) => {
   byId('result-summary').textContent = '正在连接 1688 搜索…';
   try {
     const payload = await postJson('/api/search', filters);
-    handlePayload(payload, label);
+    handlePayload(payload, label, filters.max);
   } catch (error) {
     searchFailed(error);
   } finally {
@@ -605,7 +619,7 @@ byId('image-form').addEventListener('submit', async (event) => {
   try {
     if (sourceFile) payload.imageData = await readAsDataUrl(sourceFile);
     const result = await postJson('/api/image-search', payload);
-    handlePayload(result, `${label} · 最多 ${payload.max} 件 · 搜索时间 ${new Date().toLocaleString('zh-CN')}`);
+    handlePayload(result, `${label} · 最多 ${payload.max} 件 · 搜索时间 ${new Date().toLocaleString('zh-CN')}`, payload.max);
   } catch (error) {
     searchFailed(error);
   } finally {
@@ -785,13 +799,22 @@ exportButton.addEventListener('click', async () => {
     offer.demand?.orderCountPeriod || '上游未提供统计周期',
   ]);
   {
+    clearMessage();
     exportButton.disabled = true;
     byId('export-label').textContent = '正在导出…';
     try {
+      // Static assets are read from disk, while the API stays loaded in the
+      // running process. Detect an old server before sending the newer rows.
+      const healthResponse = await fetch('/api/health', { cache: 'no-store' });
+      if (!healthResponse.ok) throw new Error('本地服务暂时不可用，请确认操作台仍在运行后重试。');
+      const health = await healthResponse.json();
+      if (health.exportSchemaVersion !== 2) {
+        throw new Error('工作台服务版本过旧。请在终端停止并重新运行 pnpm ui，再点击导出；当前结果和勾选会保留。');
+      }
       const response = await fetch('/api/export-products', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ rows: rows.map((row) => ['', ...row].map((value) => String(value ?? ''))), source }),
+        body: JSON.stringify({ schemaVersion: 2, rows: rows.map((row) => ['', ...row].map((value) => String(value ?? ''))), source }),
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));

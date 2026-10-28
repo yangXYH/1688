@@ -12,6 +12,7 @@ describe('packaged workbench API', () => {
     expect(await (await fetch(fixture.url)).text()).toContain('verified-select');
     const status = await (await fetch(`${fixture.url}/api/status`)).json();
     expect(status).toMatchObject({ connected: true, sessionPath: fixture.home });
+    expect(await (await fetch(`${fixture.url}/api/health`)).json()).toEqual({ ok: true, exportSchemaVersion: 2 });
   });
 
   it('rejects reversed price ranges before invoking the CLI and keeps serving', async () => {
@@ -33,12 +34,47 @@ describe('packaged workbench API', () => {
     expect((await post('/api/offer-details', { offerIds: ['--help'] })).status).toBe(400);
   });
 
-  it('exports an actual workbook with the previous query provenance and demand columns', async () => {
-    const response = await post('/api/export-products', { rows: [['', '123', '杯', '20', '', '', '', '100+', '', '', '', 'bookedCount', '上游未提供统计周期']], source: '上一次成功搜索；关键词「杯」' });
+  it.each([20, 30, 50, 100, 500, 1000])('passes the %i result limit to both search commands', async (max) => {
+    expect((await post('/api/search', { keyword: '杯', max })).status).toBe(200);
+    let args = (await fixture.calls()).at(-1);
+    expect(args[args.indexOf('--max') + 1]).toBe(String(max));
+    expect((await post('/api/image-search', { imageUrl: 'https://example.com/cup.png', max })).status).toBe(200);
+    args = (await fixture.calls()).at(-1);
+    expect(args[args.indexOf('--max') + 1]).toBe(String(max));
+  });
+
+  it('exports 1000 rows and rejects exports beyond the result limit', async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ['', String(1000 + i), '杯', '20', '', '', '', '', '', '', '', '', '上游未提供统计周期']);
+    const response = await post('/api/export-products', { rows, source: '最多 1000 件' });
     expect(response.status).toBe(200);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
-    expect(workbook.getWorksheet('商品')!.getCell('H1').value).toBe('销量线索');
+    expect(workbook.getWorksheet('商品')!.rowCount).toBe(1001);
+    expect(workbook.getWorksheet('商品')!.getCell('B1001').value).toBe('1999');
+    expect((await post('/api/export-products', { rows: [...rows, rows[0]], source: '超出上限' })).status).toBe(400);
+  });
+
+  it('exports an actual workbook with the previous query provenance and demand columns', async () => {
+    const response = await post('/api/export-products', { schemaVersion: 2, rows: Array.from({ length: 20 }, (_, i) => ['', String(123 + i), '杯', '20', '', '', '', '100+', '', '', '', 'bookedCount', '上游未提供统计周期']), source: '上一次成功搜索；关键词「杯」' });
+    expect(response.status).toBe(200);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    expect(workbook.getWorksheet('商品')!.getRow(1).values).toContain('销量线索');
+    expect(workbook.getWorksheet('商品')!.getRow(1).values).not.toContain('复购率');
+    expect(workbook.getWorksheet('商品')!.getRow(1).values).not.toContain('统计周期');
+    expect(workbook.getWorksheet('商品')!.rowCount).toBe(21);
     expect(workbook.getWorksheet('搜索来源')!.getCell('B1').value).toContain('上一次成功搜索');
+  });
+
+  it('reports an incompatible export schema with a recoverable error', async () => {
+    const response = await post('/api/export-products', { schemaVersion: 1 });
+    expect(response.status).toBe(409);
+    expect((await response.json()).message).toContain('导出版本不一致');
+  });
+
+  it('accepts current 13-column pages already open before schema negotiation was added', async () => {
+    const response = await post('/api/export-products', { rows: [['', '123', '杯', '20', '', '', '', '100+', '', '', '', 'bookedCount', '上游未提供统计周期']], source: '已打开页面的搜索结果' });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('spreadsheetml.sheet');
   });
 });

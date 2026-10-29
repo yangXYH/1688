@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import {
   IMAGE_SEARCH_RESULT_METHODS,
   IMAGE_SEARCH_UPLOAD_URL,
+  assertImageSearchCapture,
   imageSearchResultUrl,
+  searchByImageId,
 } from '../src/commands/image-search.js';
 import { startSearchOfferCapture } from '../src/session/search-capture.js';
 import { SEARCH_APP_ID, SEARCH_MTOP_API } from '../src/session/search-mtop.js';
@@ -29,6 +31,27 @@ describe('image-search URLs', () => {
 
   it('URL-encodes the imageId', () => {
     expect(imageSearchResultUrl('a b')).toContain('imageId=a%20b&imageIdList=a%20b');
+  });
+});
+
+describe('image-search capture outcomes', () => {
+  it('accepts a captured response', () => {
+    expect(() => assertImageSearchCapture('captured', 'https://air.1688.com/results')).not.toThrow();
+  });
+
+  it.each([
+    ['blocked', 'https://air.1688.com/punish', 4, 'RISK_CONTROL'],
+    ['blocked', 'https://login.1688.com/', 3, 'NOT_LOGGED_IN'],
+    ['timeout', 'https://air.1688.com/results', 9, 'IMAGE_SEARCH_CAPTURE_FAILED'],
+    ['stream_closed', 'https://air.1688.com/results', 9, 'IMAGE_SEARCH_CAPTURE_FAILED'],
+    ['browser_closed', 'https://air.1688.com/results', 130, 'CANCELED'],
+  ] as const)('reports %s at %s without treating it as no matches', (status, url, exitCode, code) => {
+    try {
+      assertImageSearchCapture(status, url);
+      throw new Error('Expected the capture to fail');
+    } catch (error) {
+      expect(error).toMatchObject({ exitCode, code });
+    }
   });
 });
 
@@ -74,6 +97,27 @@ const PLACEHOLDER_BODY =
   'mtopjsonpreqTppId_32517_getOfferList1({"api":"mtop.relationrecommend.wirelessrecommend.recommend","data":{"result":[],"mock":["mock"],"version":1.0},"ret":["SUCCESS::调用成功"],"v":"2.0"})';
 
 const IMAGE_ID = '1022008822148672367';
+
+it('loads and deduplicates subsequent image-search batches until the requested limit', async () => {
+  const mockPage = page();
+  let scrolls = 0;
+  Object.assign(mockPage, {
+    url: () => 'https://air.1688.com/results',
+    isClosed: () => false,
+    close: async () => {},
+    goto: async () => mockPage.emitResponse(response(recommendUrl({ method: 'getImageSearchPreResult', beginPage: 1 }), body('1', '2'))),
+    evaluate: async (fn: () => unknown) => {
+      if (fn.toString().includes('scrollHeight') && !fn.toString().includes('scrollTo')) return 100;
+      scrolls++;
+      mockPage.emitResponse(response(recommendUrl({ method: 'imageOfferSearchService', beginPage: String(scrolls + 1) }), body('2', '3')));
+    },
+    waitForFunction: async () => {},
+  });
+  const ctx = { newPage: async () => mockPage } as unknown as import('playwright').BrowserContext;
+  const offers = await searchByImageId(ctx, IMAGE_ID, 3);
+  expect(offers.map((offer) => offer.offerId)).toEqual(['1', '2', '3']);
+  expect(scrolls).toBe(1);
+});
 
 describe('image-search result capture', () => {
   it('names the mtop methods the pc-image-search results page uses', () => {

@@ -11,6 +11,7 @@ import {
   clickImageUploadButton,
 } from '../session/image-search-locators.js';
 import { captureSearchOffersForAction } from '../session/search-capture.js';
+import type { SearchOfferCaptureWaitStatus } from '../session/search-capture.js';
 import { type Offer } from './search.js';
 
 export interface ImageSearchOpts {
@@ -67,6 +68,34 @@ export const IMAGE_SEARCH_RESULT_METHODS = [
   'imageOfferSearchService',
 ] as const;
 
+function isLoginUrl(url: string): boolean {
+  return /login\.1688\.com|login\.taobao\.com/.test(url);
+}
+
+function isRiskUrl(url: string): boolean {
+  return /\/punish|x5secdata=/.test(url);
+}
+
+/** An empty capture is inconclusive; it does not prove there are no matches. */
+export function assertImageSearchCapture(
+  status: SearchOfferCaptureWaitStatus,
+  url: string,
+): void {
+  if (status === 'browser_closed') {
+    throw new CliError(130, 'CANCELED', 'Browser closed.');
+  }
+  if (isLoginUrl(url)) {
+    throw new CliError(3, 'NOT_LOGGED_IN', 'Session expired. Run `1688 login`.');
+  }
+  if (status === 'blocked' || isRiskUrl(url)) {
+    throw new CliError(4, 'RISK_CONTROL', '1688 verification required. Run once with `--headed` and complete it manually.');
+  }
+  if (status !== 'captured') {
+    throw new CliError(9, 'IMAGE_SEARCH_CAPTURE_FAILED',
+      'Could not capture image-search results. The search outcome is unknown.');
+  }
+}
+
 export async function execute(
   ctx: BrowserContext,
   args: ImageSearchArgs,
@@ -93,7 +122,7 @@ async function executeImageSearch(
   const imageId = await uploadAndGetImageId(ctx, args.imagePath);
   info(`Image uploaded (imageId=${imageId}). Fetching results...`);
 
-  const offers = await searchByImageId(ctx, imageId);
+  const offers = await searchByImageId(ctx, imageId, args.max);
   return {
     imageId,
     total: offers.length,
@@ -119,13 +148,7 @@ async function uploadAndGetImageId(
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
-    if (/login\.1688\.com|login\.taobao\.com/.test(page.url())) {
-      throw new CliError(
-        3,
-        'NOT_LOGGED_IN',
-        'Session expired. Run `1688 login`.',
-      );
-    }
+    assertImageSearchCapture('captured', page.url());
 
     await clickImageUploadButton(page);
 
@@ -136,6 +159,7 @@ async function uploadAndGetImageId(
       clickImageSearchButton(page),
     ]);
 
+    assertImageSearchCapture('captured', page.url());
     const match = page.url().match(/imageId=(\d+)/);
     if (!match) {
       throw new CliError(
@@ -145,14 +169,20 @@ async function uploadAndGetImageId(
       );
     }
     return match[1]!;
+  } catch (error) {
+    // The upload controls can disappear when navigation hits a login or risk
+    // page. Check before closing the page so recovery preserves exit 3/4.
+    assertImageSearchCapture('captured', page.url());
+    throw error;
   } finally {
     await page.close().catch(() => {});
   }
 }
 
-async function searchByImageId(
+export async function searchByImageId(
   ctx: BrowserContext,
   imageId: string,
+  max: number,
 ): Promise<Offer[]> {
   const page = await ctx.newPage();
 
@@ -168,7 +198,7 @@ async function searchByImageId(
       {
         timeoutMs: 15000,
         isClosed: () => page.isClosed(),
-        isBlocked: () => /\/punish|x5secdata=/.test(page.url()),
+        isBlocked: () => isRiskUrl(page.url()) || isLoginUrl(page.url()),
       },
     );
     if (process.env.BB1688_DEBUG === '1') {
@@ -177,10 +207,29 @@ async function searchByImageId(
           `diagnostics=${JSON.stringify(captureResult.diagnostics)}\n`,
       );
     }
-    if (captureResult.status === 'browser_closed') {
-      throw new CliError(130, 'CANCELED', 'Browser closed.');
+    assertImageSearchCapture(captureResult.status, page.url());
+    const offers = new Map(captureResult.offers.map((offer) => [offer.offerId, offer]));
+    // The image results page loads its next batch when scrolled to the bottom.
+    // Capture only the requested page so background requests cannot pollute it.
+    for (let number = 2; offers.size < max && number <= 34; number++) {
+      const previousHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      const next = await captureSearchOffersForAction(
+        { page, keep: 'largest', requireMethod: 'imageOfferSearchService', targetPage: () => number },
+        async () => {
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        },
+        { timeoutMs: 15000, isClosed: () => page.isClosed(), isBlocked: () => isRiskUrl(page.url()) || isLoginUrl(page.url()) },
+      );
+      if (next.status === 'timeout') break;
+      assertImageSearchCapture(next.status, page.url());
+      const before = offers.size;
+      for (const offer of next.offers) if (!offers.has(offer.offerId)) offers.set(offer.offerId, offer);
+      if (offers.size === before) break;
+      // Let the page render the batch before scrolling to its new bottom.
+      await page.waitForFunction((height) => document.documentElement.scrollHeight > height,
+        previousHeight, { timeout: 5000 }).catch(() => {});
     }
-    return captureResult.offers;
+    return [...offers.values()];
   } finally {
     await page.close().catch(() => {});
   }

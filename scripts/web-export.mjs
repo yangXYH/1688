@@ -34,6 +34,17 @@ async function downloadImage(value) {
 }
 
 export async function createProductWorkbook(rows, imageLoader = downloadImage, context = {}) {
+  const originalCount = rows.length;
+  if (context.dedupeOfferIds) {
+    const seen = new Set();
+    rows = rows.filter((row) => {
+      const id = String(row[1] ?? '').trim();
+      if (!id) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('商品');
   const columns = HEADERS.map((_, index) => index).filter((index) => populatedColumn(rows, index));
@@ -47,6 +58,7 @@ export async function createProductWorkbook(rows, imageLoader = downloadImage, c
   source.addRow(['导出时间', new Date().toISOString()]);
   source.addRow(['数据说明', '销量线索可能为订单数或 bookedCount，不能直接等同于售出件数；未提供统计周期时请勿推断。']);
   source.addRow(['图片说明', '单元格图片需新版 Excel 支持；图片链接保留在商品表。']);
+  if (context.dedupeOfferIds) source.addRow(['去重说明', `按商品编号去重，重复编号保留首条；无编号的记录保留。原 ${originalCount} 条，导出 ${rows.length} 条。`]);
   let missingImages = 0;
   const cellImages = [];
   // Limit concurrent image requests to avoid flooding the image host.
@@ -57,6 +69,19 @@ export async function createProductWorkbook(rows, imageLoader = downloadImage, c
       const row = sheet.addRow(columns.map((index) => String(batch[i][index] ?? '')));
       row.height = 75;
       row.alignment = { vertical: 'middle', wrapText: true };
+      for (const originalIndex of [9, 10]) {
+        const columnIndex = columns.indexOf(originalIndex);
+        if (columnIndex < 0) continue;
+        const value = String(batch[i][originalIndex] ?? '');
+        try {
+          const url = new URL(value);
+          if ((url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password) {
+            const cell = row.getCell(columnIndex + 1);
+            cell.value = { text: value, hyperlink: value };
+            cell.font = { color: { argb: 'FF0563C1' }, underline: true };
+          }
+        } catch { /* Keep non-URL values as plain text. */ }
+      }
       if (images[i]) {
         row.getCell(1).value = '图片';
         cellImages.push({ ...images[i], row: row.number });
@@ -68,5 +93,5 @@ export async function createProductWorkbook(rows, imageLoader = downloadImage, c
       }
     }
   }
-  return { buffer: await embedCellImages(Buffer.from(await workbook.xlsx.writeBuffer()), cellImages), missingImages };
+  return { buffer: await embedCellImages(Buffer.from(await workbook.xlsx.writeBuffer()), cellImages), missingImages, exportedCount: rows.length };
 }

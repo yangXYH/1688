@@ -12,7 +12,7 @@ describe('packaged workbench API', () => {
     expect(await (await fetch(fixture.url)).text()).toContain('verified-select');
     const status = await (await fetch(`${fixture.url}/api/status`)).json();
     expect(status).toMatchObject({ connected: true, sessionPath: fixture.home });
-    expect(await (await fetch(`${fixture.url}/api/health`)).json()).toEqual({ ok: true, exportSchemaVersion: 2 });
+    expect(await (await fetch(`${fixture.url}/api/health`)).json()).toEqual({ ok: true, exportSchemaVersion: 2, offerDedupeVersion: 1 });
   });
 
   it('rejects reversed price ranges before invoking the CLI and keeps serving', async () => {
@@ -70,6 +70,20 @@ describe('packaged workbench API', () => {
     const response = await post('/api/export-products', { schemaVersion: 1 });
     expect(response.status).toBe(409);
     expect((await response.json()).message).toContain('导出版本不一致');
+  });
+
+  it('deduplicates offer IDs only when requested and validates the option', async () => {
+    const rows = [
+      ['', '1', '甲', '', '', '', '', '', '', 'https://example.com/a.jpg', 'https://detail.1688.com/offer/1.html', '', ''],
+      ['', '1', '乙', '', '', '', '', '', '', 'https://example.com/a.jpg', 'https://detail.1688.com/offer/1.html', '', ''],
+    ];
+    const response = await post('/api/export-products', { rows, source: '图片搜索', dedupeOfferIds: true });
+    expect(response.status).toBe(200);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    expect(workbook.getWorksheet('商品')!.rowCount).toBe(2);
+    expect(response.headers.get('x-exported-count')).toBe('1');
+    expect((await post('/api/export-products', { rows, source: '图片搜索', dedupeOfferIds: 'true' })).status).toBe(400);
   });
 
   it('accepts current 13-column pages already open before schema negotiation was added', async () => {

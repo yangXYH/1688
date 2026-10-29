@@ -400,7 +400,7 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? `${HOST}:${PORT}`}`);
     if (req.method === 'GET' && url.pathname === '/api/health') {
-      return sendJson(res, 200, { ok: true, exportSchemaVersion: EXPORT_SCHEMA_VERSION });
+      return sendJson(res, 200, { ok: true, exportSchemaVersion: EXPORT_SCHEMA_VERSION, offerDedupeVersion: 1 });
     }
 
     assertLocalRequest(req);
@@ -469,15 +469,17 @@ const server = createServer(async (req, res) => {
       }
       if (!Array.isArray(body.rows) || body.rows.length < 1 || body.rows.length > MAX_RESULTS ||
           body.rows.some((row) => !Array.isArray(row) || row.length !== 13 || row.some((value) => typeof value !== 'string' || value.length > 10000)) ||
-          typeof body.source !== 'string' || body.source.length > 2000) {
+          typeof body.source !== 'string' || body.source.length > 2000 ||
+          (body.dedupeOfferIds !== undefined && typeof body.dedupeOfferIds !== 'boolean')) {
         throw Object.assign(new Error('导出数据无效。'), { status: 400 });
       }
-      const { buffer, missingImages } = await createProductWorkbook(body.rows, undefined, { source: body.source });
+      const { buffer, missingImages, exportedCount } = await createProductWorkbook(body.rows, undefined, { source: body.source, dedupeOfferIds: body.dedupeOfferIds === true });
       res.writeHead(200, {
         'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'content-length': buffer.length,
         'cache-control': 'no-store',
         'x-missing-images': String(missingImages),
+        'x-exported-count': String(exportedCount),
       });
       return res.end(buffer);
     }
@@ -523,7 +525,7 @@ const server = createServer(async (req, res) => {
           } else {
             source = validateImageUrl(body.imageUrl);
           }
-          const data = parseCliJson(await runCli(['image-search', source, '--max', String(max), '--json', '--pretty']));
+          const data = parseCliJson(await runCli(['image-search', source, '--max', String(max), '--json', '--pretty'], max > 50 ? 330_000 : 180_000));
           return sendJson(res, 200, data);
         } finally {
           if (uploadedPath) await rm(uploadedPath, { force: true });

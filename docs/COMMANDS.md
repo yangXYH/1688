@@ -25,16 +25,26 @@ These are upper limits, not guaranteed counts. Excel export accepts up to
 only unavailable placeholders across all selected offers. A column with any
 real value (including zero) is retained. The image column remains first; image
 loading and links are preserved when other columns are omitted. Missing-period
-definitions remain in the search-source worksheet. Keyword search uses normal
+definitions remain in the search-source worksheet. Image-link and product-link
+cells are clickable and open the image or corresponding 1688 offer respectively.
+The optional Excel deduplication choice keeps the first row for each product
+ID and preserves rows without an ID. Different product IDs remain separate,
+even when they refer to similar products from different sellers.
+Keyword search uses normal
 in-page pagination, matching both the
 current CSS-module next-arrow control and the legacy control. It stops once
 enough unique offers exist; repeated ads/items allow additional sequential
 pages, bounded by twice the nominal count and 34 pages, with existing delays
 and early stops. Optional JSON `pagination` identifies the captured page count
 and stop reason. The UI distinguishes a missing/failed next button or timeout
-from the end of results. Image search currently uses the single
-platform result response, so it may return fewer than the selected limit.
-The UI reports the actual count. Requests above 50 allow up to 330 seconds
+from the end of results. Image search scrolls the results page to collect
+subsequent batches and deduplicates offer IDs. It stops at the selected limit,
+a capture timeout, a batch with no new offers, or 34 pages. A timeout does
+not prove that the platform has exhausted its results.
+The UI reports the actual count. An initial image-search capture timeout is an unknown
+outcome, not evidence that the platform found no matches; the command returns
+`IMAGE_SEARCH_CAPTURE_FAILED`. Login and verification redirects return their
+usual exit 3/4 errors. Requests above 50 allow up to 330 seconds
 for the search subprocess (the daemon call retains its five-minute timeout).
 
 ## Sourcing

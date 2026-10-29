@@ -22,6 +22,7 @@ async function workbench() {
   const requests: any[] = [];
   let failSearch = false;
   let exportSchemaVersion: number | undefined = 2;
+  let offerDedupeVersion: number | undefined = 1;
   const offer = { offerId: '123', title: '杯子', price: { text: '¥20' }, turnover: '100+', demand: { orderCountText: '100+', orderCountSource: 'bookedCount' }, verified: { factory: true, business: true } };
   const context = vm.createContext({
     document: { getElementById: element, querySelectorAll: () => [], querySelector: element, addEventListener() {}, createElement: element, body: element('body') },
@@ -30,7 +31,7 @@ async function workbench() {
     fetch: async (url: string, options: any) => {
       const body = options?.body ? JSON.parse(options.body) : null;
       requests.push({ url, body });
-      if (url === '/api/health') return { ok: true, json: async () => ({ ok: true, exportSchemaVersion }) };
+      if (url === '/api/health') return { ok: true, json: async () => ({ ok: true, exportSchemaVersion, offerDedupeVersion }) };
       if (url === '/api/export-products') return { ok: true, blob: async () => ({}), headers: { get: () => '0' } };
       return { ok: !(failSearch && url === '/api/search'), json: async () => url === '/api/status' ? { connected: false, sessionPath: 'test-home' }
         : failSearch && url === '/api/search' ? { message: '网络中断' } : { offers: [offer], total: 1 } };
@@ -43,11 +44,32 @@ async function workbench() {
     fail: () => { failSearch = true; },
     oldServer: () => { exportSchemaVersion = undefined; },
     currentServer: () => { exportSchemaVersion = 2; },
+    oldGrouping: () => { offerDedupeVersion = undefined; },
     submit: () => element('keyword-form').listeners.submit({ preventDefault() {} }),
   };
 }
 
 describe('workbench buyer regressions', () => {
+  it('sends the optional offer ID deduplication choice when exporting', async () => {
+    const ui = await workbench();
+    ui.element('keyword-input').value = '杯';
+    await ui.submit();
+    ui.element('export-dedupe-offers').checked = true;
+    await ui.element('export-button').listeners.click();
+    expect(ui.requests.find((request) => request.url === '/api/export-products').body.dedupeOfferIds).toBe(true);
+  });
+
+  it('does not silently export without grouping on an older server', async () => {
+    const ui = await workbench();
+    ui.element('keyword-input').value = '杯';
+    await ui.submit();
+    ui.element('export-dedupe-offers').checked = true;
+    ui.oldGrouping();
+    await ui.element('export-button').listeners.click();
+    expect(ui.requests.some((request) => request.url === '/api/export-products')).toBe(false);
+    expect(ui.element('message-box').textContent).toContain('重新运行 pnpm ui');
+    expect(ui.run('state.offers.length')).toBe(1);
+  });
   it('shows the actual pagination failure reason for partial results', async () => {
     const ui = await workbench();
     ui.run("handlePayload({offers:[{offerId:'123'}],pagination:{pagesFetched:1,stopReason:'next_page_unavailable'}}, '关键词搜索', 1000)");

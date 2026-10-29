@@ -808,13 +808,14 @@ exportButton.addEventListener('click', async () => {
       const healthResponse = await fetch('/api/health', { cache: 'no-store' });
       if (!healthResponse.ok) throw new Error('本地服务暂时不可用，请确认操作台仍在运行后重试。');
       const health = await healthResponse.json();
-      if (health.exportSchemaVersion !== 2) {
+      const dedupeOfferIds = byId('export-dedupe-offers').checked;
+      if (health.exportSchemaVersion !== 2 || (dedupeOfferIds && health.offerDedupeVersion !== 1)) {
         throw new Error('工作台服务版本过旧。请在终端停止并重新运行 pnpm ui，再点击导出；当前结果和勾选会保留。');
       }
       const response = await fetch('/api/export-products', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ schemaVersion: 2, rows: rows.map((row) => ['', ...row].map((value) => String(value ?? ''))), source }),
+        body: JSON.stringify({ schemaVersion: 2, dedupeOfferIds, rows: rows.map((row) => ['', ...row].map((value) => String(value ?? ''))), source }),
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
@@ -830,7 +831,9 @@ exportButton.addEventListener('click', async () => {
       link.remove();
       URL.revokeObjectURL(href);
       const missing = Number(response.headers.get('x-missing-images')) || 0;
-      showToast(missing ? `已导出 ${picked.length} 件商品，其中 ${missing} 张图片加载失败。` : `已导出 ${picked.length} 件商品。`);
+      const countHeader = response.headers.get('x-exported-count');
+      const exportedCount = countHeader === null ? picked.length : Number(countHeader);
+      showToast(missing ? `已导出 ${exportedCount} 件商品，其中 ${missing} 张图片加载失败。` : `已导出 ${exportedCount} 件商品。`);
     } catch (error) {
       showMessage(error.message || '导出失败，请重试。');
     } finally {

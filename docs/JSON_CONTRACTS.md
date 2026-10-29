@@ -159,6 +159,14 @@ results. Later-page login/risk challenges use the existing exit 3/4 errors.
 Repeated offers are deduplicated; collection can continue beyond the nominal
 page count, bounded by twice that count and an absolute 34 pages.
 
+`image-search` captures the initial response, then scrolls to collect subsequent
+`imageOfferSearchService` batches and deduplicates offer IDs. It stops at
+`--max`, a later-batch timeout, a batch with no new offers, or 34 pages, and
+truncates the returned offers to `--max`. A later timeout returns the collected
+results and does not establish platform exhaustion. Failure to capture the
+initial result returns `IMAGE_SEARCH_CAPTURE_FAILED` (exit 9), not an empty
+successful result. Login and risk-control redirects return exit 3 and 4.
+
 `verified` remains compatible: `factory` maps only to `factoryInspection`,
 `business` to `businessInspection`, and `superFactory` to `superFactory` in the
 search response. Optional `verificationSource` names these fields and their

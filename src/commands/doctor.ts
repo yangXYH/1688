@@ -198,46 +198,40 @@ async function checkProfile(name?: string): Promise<Check> {
   }
 }
 
-function chromiumCacheDir(): string {
-  if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
-    return process.env.PLAYWRIGHT_BROWSERS_PATH;
-  }
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library/Caches/ms-playwright');
-  }
-  if (process.platform === 'win32') {
-    return path.join(
-      process.env.LOCALAPPDATA ?? os.homedir(),
-      'ms-playwright',
-    );
-  }
-  return path.join(os.homedir(), '.cache/ms-playwright');
-}
-
-async function checkChromiumCache(): Promise<Check> {
-  const cache = chromiumCacheDir();
-  try {
-    const entries = await fs.readdir(cache);
-    const hit = entries.find((n) => n.startsWith('chromium'));
-    if (hit) {
-      return {
-        name: 'Chromium cache',
-        status: 'ok',
-        message: `${hit} @ ${cache}`,
-      };
+export async function checkChromiumCache(): Promise<Check> {
+  // Keep the check name stable, but mirror runtime/postinstall: system Chrome
+  // is sufficient unless the user explicitly forces bundled Chromium.
+  if (process.env.BB1688_FORCE_CHROMIUM !== '1') {
+    const candidates = process.platform === 'win32' ? [
+      path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
+      path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Google/Chrome/Application/chrome.exe'),
+      ...(process.env.LOCALAPPDATA ? [path.join(process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe')] : []),
+    ] : process.platform === 'darwin' ? [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    ] : ['/opt/google/chrome/chrome'];
+    for (const executable of candidates) {
+      try {
+        await fs.access(executable, fs.constants.F_OK);
+        return { name: 'Chromium cache', status: 'ok', message: `System Chrome found (${executable}); bundled Chromium is optional` };
+      } catch { /* try the next supported installation path */ }
     }
+  }
+  // Check the executable required by this Playwright version. An old or empty
+  // chromium-* directory does not prove that the runtime browser is installed.
+  const executable = chromium.executablePath();
+  try {
+    await fs.access(executable, fs.constants.F_OK);
     return {
       name: 'Chromium cache',
-      status: 'fail',
-      message: `no chromium-* dir in ${cache}`,
-      fix: 'npx playwright install chromium',
+      status: 'ok',
+      message: `Bundled Chromium found (${executable})`,
     };
   } catch {
     return {
       name: 'Chromium cache',
       status: 'fail',
-      message: `cache dir missing (${cache})`,
-      fix: 'npx playwright install chromium',
+      message: `Required browser executable missing (${executable})`,
+      fix: process.env.BB1688_FORCE_CHROMIUM === '1' ? 'npx playwright install chromium' : 'Install Google Chrome OR run: npx playwright install chromium',
     };
   }
 }

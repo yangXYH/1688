@@ -21,6 +21,13 @@ Last updated: 2026-06-04
 | Export formats | Done | Added `--jsonl` and `--csv` for research datasets while keeping normal command JSON stable for agents. |
 | Sourcing score | Done | Computed, explainable V1 score from price, demand, supplier tenure, verification, tags, and ad status. |
 
+## Supplier Dialogue
+
+| Feature | Status | Notes |
+|---|---|---|
+| Local supplier questionnaire | Done | Model-assisted per-offer conversations, fixed-question automation with explicit authorization, per-message review by default, persistent outbox and evidence, bounded model concurrency, shared account queue, CSV export. Live seller compatibility still requires an authorized account test. |
+| Visible Chrome plugin | Done | MV3 side panel drives native search and per-supplier 旺旺 tabs in the user's Chrome; manual takeover/replies, origin/token bridge, no cookie export, panel-close pause. Isolated browser verification; live-account compatibility requires user installation. |
+
 ## Agent Maps
 
 | Feature | Status | Notes |

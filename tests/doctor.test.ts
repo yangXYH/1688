@@ -1,8 +1,38 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import { chromium } from 'playwright';
 import {
+  checkChromiumCache,
   removePathFix,
   writePermissionFix,
 } from '../src/commands/doctor.js';
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+describe('doctor browser installation check', () => {
+  it('accepts system Chrome without requiring a second Chromium download', async () => {
+    vi.stubEnv('BB1688_FORCE_CHROMIUM', '0');
+    vi.spyOn(fs, 'access').mockImplementation(async (filename) => {
+      if (!/chrome\.exe$|Google Chrome$|\/opt\/google\/chrome\/chrome$/.test(String(filename))) throw new Error('missing');
+    });
+    expect(await checkChromiumCache()).toMatchObject({ status: 'ok', message: expect.stringContaining('System Chrome found') });
+  });
+  it('honors forced Chromium even when system Chrome exists', async () => {
+    vi.stubEnv('BB1688_FORCE_CHROMIUM', '1');
+    const access = vi.spyOn(fs, 'access').mockRejectedValue(new Error('missing'));
+    expect(await checkChromiumCache()).toMatchObject({ status: 'fail', fix: 'npx playwright install chromium' });
+    expect(access).toHaveBeenCalledTimes(1);
+    expect(access.mock.calls[0]?.[0]).toBe(chromium.executablePath());
+  });
+  it('accepts only the executable matching the current Playwright version', async () => {
+    vi.stubEnv('BB1688_FORCE_CHROMIUM', '1');
+    const access = vi.spyOn(fs, 'access').mockResolvedValue();
+    expect(await checkChromiumCache()).toMatchObject({ status: 'ok', message: expect.stringContaining(chromium.executablePath()) });
+    expect(access).toHaveBeenCalledTimes(1);
+    access.mockRejectedValue(new Error('stale cache'));
+    expect(await checkChromiumCache()).toMatchObject({ status: 'fail' });
+  });
+});
 
 describe('doctor platform hints', () => {
   it('prints Unix permission and removal fixes', () => {

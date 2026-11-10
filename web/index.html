@@ -7,6 +7,7 @@
     <title>采货台 · 1688 选品工作台</title>
     <link rel="stylesheet" href="/style.css">
     <script src="/app.js" defer></script>
+    <script src="/supplier-ui.js" defer></script>
   </head>
   <body>
     <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -33,6 +34,7 @@
           <button class="nav-item active" type="button" data-mode="keyword"><svg class="icon"><use href="#i-search"/></svg><span>关键词搜索</span><svg class="icon nav-arrow"><use href="#i-chevron"/></svg></button>
           <button class="nav-item" type="button" data-mode="image"><svg class="icon"><use href="#i-image"/></svg><span>图片找同款</span><svg class="icon nav-arrow"><use href="#i-chevron"/></svg></button>
           <button class="nav-item" type="button" data-mode="bestseller"><svg class="icon"><use href="#i-trend"/></svg><span>畅销排序</span><span class="nav-count">HOT</span></button>
+          <button class="nav-item" id="supplier-nav" type="button"><svg class="icon"><use href="#i-spark"/></svg><span>供应商问答</span></button>
         </nav>
         <div class="sidebar-tip"><svg class="icon tip-icon"><use href="#i-spark"/></svg><strong>让灵感，找到货源。</strong><p>带上品类、材质或规格搜索，试试更具体的关键词。</p><span class="tip-example">例如：304 不锈钢保温杯</span><span class="tip-decoration" aria-hidden="true"></span></div>
         <div class="sidebar-bottom">
@@ -93,6 +95,14 @@
             </div>
             <div id="message-box" class="message-box" role="status" hidden></div>
             <button id="compare-button" class="secondary-button" type="button" disabled>比较已选采购信息（最多 5 件）</button>
+            <section id="search-inquiry" class="dialogue-box search-inquiry" aria-label="搜索结果自动询盘" hidden>
+              <div class="dialogue-detail-heading"><div><h3>搜索结果 → 自动问答 → 筛选结论</h3><p id="inquiry-target-summary">搜索后，可直接对结果中的商品发起问答。</p></div><button id="inquiry-trigger" class="primary-button" type="button" disabled>开始自动询盘</button></div>
+              <div class="dialogue-actions"><label>未勾选商品时，询盘前几件<input id="inquiry-count" type="number" value="5" min="1" max="100"></label><label class="dialogue-check"><input id="inquiry-cert" type="checkbox" checked>需要资质资料</label><button id="inquiry-settings" class="secondary-button" type="button">模型与问答设置</button></div>
+              <label class="dialogue-check"><input id="inquiry-clarify" type="checkbox" checked>回复不明确时，允许按下方话术每项自动追问一次</label>
+              <details><summary>查看本次询盘对象和固定话术</summary><ul id="inquiry-targets"></ul><ol id="inquiry-questions"></ol><p>首次附商品链接。只发送采购问题，不承诺下单或费用；不明确的回复和附件会显示为需复核。</p></details>
+              <label class="dialogue-check"><input id="inquiry-consent" type="checkbox">我已查看对象与话术，授权对本次搜索选中的商品自动进行问答。</label>
+              <p id="inquiry-progress" role="status"></p>
+            </section>
             <div id="comparison-panel" class="comparison-panel" hidden></div>
             <div id="loading-state" class="loading-state" role="status" hidden><div class="loading-copy"><span class="spinner"></span><div><strong>正在为你寻找货源</strong><p>正在获取 1688 实时商品，请稍候…</p></div></div><div class="skeleton-grid" aria-hidden="true"><div class="skeleton-card"><span></span><i></i><i></i></div><div class="skeleton-card"><span></span><i></i><i></i></div><div class="skeleton-card"><span></span><i></i><i></i></div></div></div>
             <div id="results-grid" class="results-grid" hidden></div>
@@ -104,6 +114,35 @@
             </div>
           </section>
           <p id="session-path" class="session-path">正在读取会话目录…</p>
+          <section id="supplier-panel" class="supplier-panel" aria-label="供应商智能问答" hidden>
+            <div id="native-browser-notice" class="dialogue-flow-source" hidden>已切换到 Chrome 插件模式。请在真实旺旺页面查看和回复消息；原网页不再显示聊天副本。<a href="/extension-install.html" target="_blank">查看插件安装方法</a></div>
+            <div id="supplier-flow-source" class="dialogue-flow-source" hidden></div>
+            <div class="dialogue-banner"><div><strong>多家供应商，同步推进</strong><p>固定问答由模型理解回复并推进；反问、图片、文件及含糊回答交给你确认。筛选结果为供应商自述，资质仍需核验。</p></div><button type="button" class="secondary-button" id="supplier-export">导出问答 CSV</button></div>
+            <div id="supplier-message" role="status" class="message-box" hidden></div>
+            <div class="supplier-setup">
+              <form id="supplier-config" class="dialogue-box">
+                <h2>1. 连接模型</h2>
+                <label>完整 Chat Completions 接口地址<input id="supplier-endpoint" type="url" placeholder="https://你的服务/v1/chat/completions" required></label>
+                <label>模型名称<input id="supplier-model" maxlength="150" placeholder="服务商提供的模型标识" required></label>
+                <label>API Key<input id="supplier-key" type="password" maxlength="1000" autocomplete="off" placeholder="只在本次服务进程内保存"></label>
+                <label>模型并发数<input id="supplier-workers" type="number" min="1" max="8" value="2" required></label>
+                <p id="supplier-model-status">支持兼容 Chat Completions 的服务。密钥不会写入问答记录或返回给页面。</p><p>模型将接收当前问题、供应商回复和近期会话，请配置你认可的服务。</p>
+                <div class="dialogue-actions"><button class="secondary-button" type="submit">保存连接</button><button class="secondary-button" type="button" id="supplier-test">测试模型</button></div>
+              </form>
+              <form id="supplier-create" class="dialogue-box">
+                <h2>2. 添加询盘商品</h2>
+                <label>商品链接或 ID（每行一个，每批最多 100 个）<textarea id="supplier-targets" rows="4" placeholder="https://detail.1688.com/offer/商品编号.html" required></textarea></label>
+                <button type="button" class="text-button" id="supplier-import">填入当前搜索已选商品</button>
+                <label class="dialogue-check"><input type="checkbox" id="supplier-cert" checked>需要询问资质和提前提供报告</label>
+                <label>发送方式<select id="supplier-mode"><option value="review">逐条审核后发送</option><option value="automatic">自动发送已授权的固定问答</option></select></label>
+                <details><summary>查看将发送的固定话术</summary><ol id="supplier-questions"></ol><p>首次发送会附带目标商品链接。后续仅发送问题文本。</p></details>
+                <label class="dialogue-check"><input type="checkbox" id="supplier-consent">我已查看目标及话术，授权自动模式向这些供应商发送所展示的固定问题。</label>
+                <button class="secondary-button" type="submit">加入问答队列</button>
+              </form>
+            </div>
+            <div class="dialogue-controls dialogue-box"><div><strong id="supplier-status">问答未启动</strong><p id="supplier-stats">等待添加任务</p></div><label>本次最多发送消息数<input type="number" id="supplier-budget" min="1" max="1000" value="100"></label><button class="primary-button" type="button" id="supplier-start">启动问答</button><button class="secondary-button" type="button" id="supplier-pause">暂停全部</button></div>
+            <div class="supplier-workspace"><div id="supplier-jobs" class="dialogue-box" aria-label="供应商会话列表"></div><div id="supplier-detail" class="dialogue-box" aria-label="会话内容"><p>添加商品后，在这里查看对话、审核消息和筛选结果。</p></div></div>
+          </section>
           <footer class="page-footer"><span><span class="footer-brand">采货台</span>让每一次选品，都更有把握。</span><span>商品与价格以 1688 页面实时信息为准</span></footer>
         </div>
       </main>

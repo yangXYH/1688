@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "采货台 · 可见自动问答",
+  "description": "在你已登录的 1688 Chrome 页面中搜索、批量问答，随时接管真实旺旺会话。",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjZikCb7jgsIAowHTH1paAUg6SX68xLaf8EYnIZWLraFntc69SaeGow5i6rcp3FT+v3IQgFxOAqkx4vHMXQhpmXQThlVEua/5jSd7390VSde+SB9UKXNwAZisNmJeb4gHbF6HEitM81MTu+Cl1AsZGfJn9erluw8UwYrj+sxBcdrVwLvfNisVJzGQhbfErWo5+nrFLIhFL0c8AJuw5kt5tB7No012evIC13yYEnIxqcTRjuwv4PpCn+uxYr0sL4J85YfsiO8qJZQUNi4LsM/9HsweiU05OmyfOgS1FAbVoEW7OJVkX3pNWPUOJF3BEi7lBcCXAmwibcXEnk74240J+QIDAQAB",
+  "permissions": ["sidePanel", "scripting", "tabs", "storage"],
+  "host_permissions": ["https://*.1688.com/*", "http://127.0.0.1/*"],
+  "action": { "default_title": "打开采货台自动问答侧栏" },
+  "side_panel": { "default_path": "panel.html" },
+  "background": { "service_worker": "worker.js", "type": "module" },
+  "content_scripts": [
+    { "matches": ["https://*.1688.com/*"], "all_frames": true, "run_at": "document_start", "world": "MAIN", "js": ["page-hook.js"] },
+    { "matches": ["https://*.1688.com/*"], "all_frames": true, "match_about_blank": true, "run_at": "document_idle", "js": ["content.js"], "css": ["content.css"] }
+  ],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" }
+}

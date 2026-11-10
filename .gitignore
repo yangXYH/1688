@@ -28,6 +28,10 @@ work/
 scripts/probe-*.mjs
 scripts/check-chat.mjs
 
+# Local exports and probes; publish only the allowlisted extension package.
+outputs/*
+!outputs/1688-chrome-extension.zip
+
 # Secrets
 .env
 .env.*

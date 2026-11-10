@@ -13,14 +13,18 @@ export async function startWebFixture() {
   await fs.mkdir(path.join(dir, 'dist/session'), { recursive: true });
   await fs.mkdir(home);
   await fs.cp(path.join(root, 'web'), path.join(dir, 'web'), { recursive: true });
+  await fs.cp(path.join(root, 'extension'), path.join(dir, 'extension'), { recursive: true });
   await fs.mkdir(path.join(dir, 'scripts'));
-  for (const name of ['web-ui.mjs', 'web-export.mjs', 'web-cell-images.mjs']) {
+  for (const name of ['web-ui.mjs', 'web-export.mjs', 'web-cell-images.mjs', 'supplier-dialogue.mjs', 'extension-bridge.mjs']) {
     await fs.copyFile(path.join(root, 'scripts', name), path.join(dir, 'scripts', name));
   }
   await fs.symlink(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
   await fs.writeFile(path.join(dir, 'package.json'), '{"type":"module"}');
   const paths = await fs.readFile(path.join(root, 'src/session/paths.ts'), 'utf8');
   await fs.writeFile(path.join(dir, 'dist/session/paths.js'), ts.transpileModule(paths, { compilerOptions: { module: ts.ModuleKind.ES2022 } }).outputText);
+  await fs.mkdir(path.join(dir, 'dist/util'));
+  const encoding = await fs.readFile(path.join(root, 'src/util/encoding.ts'), 'utf8');
+  await fs.writeFile(path.join(dir, 'dist/util/encoding.js'), ts.transpileModule(encoding, { compilerOptions: { module: ts.ModuleKind.ES2022 } }).outputText);
   await fs.writeFile(path.join(dir, 'dist/cli.js'), `
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -28,9 +32,23 @@ const args = process.argv.slice(2);
 await fs.appendFile(path.join(process.env.BB1688_HOME, 'calls.jsonl'), JSON.stringify(args) + '\\n');
 const offer = {offerId:'123',title:'测试保温杯',price:{text:'¥20',min:20,max:20},supplier:{name:'测试供应商'},location:{province:'浙江',city:'杭州'},verified:{factory:true,business:true},demand:{orderCountText:'100+',orderCountSource:'bookedCount',orderCountPeriod:null}};
 const detail = {offerId:'123',title:'测试保温杯',minOrderQty:10,mixOrderQty:20,unitName:'件',priceTiers:[{minQty:10,price:20},{minQty:100,price:18}],skus:[{skuId:'1',specs:'黑色',price:20,stock:100}]};
-if(args[0] === 'whoami') console.log(JSON.stringify({loggedIn:true}));
+let doctorFailure = null;
+if (args[0] === 'doctor') { try { doctorFailure = JSON.parse(await fs.readFile(path.join(process.env.BB1688_HOME, 'doctor-failure.json'), 'utf8')); } catch {} }
+if(doctorFailure) { console.log(JSON.stringify(doctorFailure)); console.error(JSON.stringify({ok:false,code:'DOCTOR_FAILED',message:''})); process.exitCode=6; }
+else if(args[0] === 'whoami') console.log(JSON.stringify({loggedIn:true}));
 else if(args[0] === 'daemon') console.log(JSON.stringify({running:true,reachable:true}));
 else if(args[0] === 'offer') console.log(JSON.stringify(detail));
+else if(args[0] === 'seller') {
+  const file = path.join(process.env.BB1688_HOME, 'fixture-messages.json');
+  let messages = []; try { messages = JSON.parse(await fs.readFile(file, 'utf8')); } catch {}
+  if(args[1] === 'inquire') {
+    const index = messages.length;
+    messages.push({messageId:'mine-'+index,isMine:true,kind:'text',content:args[3],sender:'buyer',time:'2026-11-09 12:00:00'});
+    messages.push({messageId:'reply-'+index,isMine:false,kind:'text',content:'有的，支持。',sender:'seller-123',time:'2026-11-09 12:00:01'});
+    await fs.writeFile(file, JSON.stringify(messages));
+    console.log(JSON.stringify({ok:true,sentTo:'seller-123',sentAt:new Date().toISOString()}));
+  } else console.log(JSON.stringify({conversation:'seller-123',sellerLoginId:'seller-123',messages,total:messages.length}));
+}
 else if(args[1] === 'fail') {console.error(JSON.stringify({code:'NETWORK_ERROR',message:'测试搜索失败'}));process.exitCode=9;}
 else console.log(JSON.stringify({offers:[offer],total:1}));
 `);

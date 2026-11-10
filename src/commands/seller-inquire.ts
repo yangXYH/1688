@@ -3,6 +3,7 @@ import { dispatch } from '../session/dispatch.js';
 import { emit, info } from '../io/output.js';
 import { CliError } from '../io/errors.js';
 import { executeRaw as cartListExecute } from './cart-list.js';
+import { execute as offerExecute } from './offer.js';
 import { readState } from '../session/state.js';
 import { sleep } from '../session/wait.js';
 import type {
@@ -14,6 +15,7 @@ export interface SellerInquireOpts {
   offerId: string;
   message: string;
   to?: string; // explicit seller loginId
+  textOnly?: boolean; // follow-up: retain offer scope without repeating the product card
   profile?: string;
   headed?: boolean;
 }
@@ -68,15 +70,15 @@ export async function run(opts: SellerInquireOpts): Promise<void> {
     myLoginId: state.nick,
   };
 
-  info(`Sending message 1/2: product link`);
-  await dispatch<SellerChatArgs, SellerChatResult>(
-    'seller-chat',
-    { ...chatBaseArgs, message: productUrl },
-    { headed: opts.headed, profile: opts.profile },
-  );
-
-  // Small pause so the 2 sends look natural (and avoid hammering)
-  await sleep(1500);
+  if (!opts.textOnly) {
+    info(`Sending message 1/2: product link`);
+    await dispatch<SellerChatArgs, SellerChatResult>(
+      'seller-chat',
+      { ...chatBaseArgs, message: productUrl },
+      { headed: opts.headed, profile: opts.profile },
+    );
+    await sleep(1500);
+  }
 
   info(`Sending message 2/2: question`);
   const data = await dispatch<SellerChatArgs, SellerChatResult>(
@@ -88,7 +90,7 @@ export async function run(opts: SellerInquireOpts): Promise<void> {
   emit({
     human: () => {
       process.stdout.write(`✓ Inquiry sent to ${data.sentTo}\n`);
-      process.stdout.write(`  msg 1 (link):     ${productUrl}\n`);
+      if (!opts.textOnly) process.stdout.write(`  msg 1 (link):     ${productUrl}\n`);
       process.stdout.write(`  msg 2 (question): ${opts.message}\n`);
       process.stdout.write(`  at: ${data.sentAt}\n`);
     },
@@ -161,8 +163,13 @@ export async function scrapeFeGlobals(
       const w = window as unknown as { FE_GLOBALS?: { offerLoginId?: string } };
       return { offerLoginId: w.FE_GLOBALS?.offerLoginId ?? null };
     });
-    return result;
+    if (result.offerLoginId) return result;
   } finally {
     await page.close().catch(() => {});
   }
+  // Some current detail pages omit FE_GLOBALS.offerLoginId while the structured
+  // offer response still carries sellerLoginId. Use the existing offer capture
+  // rather than guessing a seller from the sidebar or display name.
+  const offer = await offerExecute(ctx, { offerId: args.offerId });
+  return { offerLoginId: offer.supplier.loginId };
 }

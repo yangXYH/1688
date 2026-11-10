@@ -222,6 +222,7 @@ seller
   .argument('<offerId>', 'Offer ID (digits)')
   .argument('<message>', 'Question to ask (≤ 400 chars)')
   .option('--to <sellerLoginId>', 'Override seller lookup with explicit loginId')
+  .option('--text-only', 'Send follow-up text without repeating the product link')
   .option('--profile <name>', 'Profile name (default: default)')
   .option('--headed', 'Open a window (debug visibility)')
   .action(async (offerId, message, opts) => {
@@ -240,6 +241,7 @@ seller
     'Only show messages after this ISO timestamp (e.g. 2026-05-12T16:44:00+08:00)',
   )
   .option('--watch', 'Poll continuously and print new messages as they arrive')
+  .option('--inspect', 'Open a visible read-only conversation and keep it open until closed')
   .option(
     '--interval <seconds>',
     'Polling interval in seconds for --watch (default 30, min 10)',

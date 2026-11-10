@@ -7,6 +7,8 @@
 
 [English](./README.md) | [简体中文](./README_zh-CN.md)
 
+**Visible Chrome automation:** [Chinese user manual](docs/chrome-extension-guide.zh-CN.md) · [Extension ZIP](outputs/1688-chrome-extension.zip)
+
 Command-line tool for Alibaba 1688.com wholesale: product search, supplier
 company search, supplier scraper/research, image search, supplier inquiry, cart,
 checkout, order tracking, and seller chat. Outputs JSON when piped (for Codex /

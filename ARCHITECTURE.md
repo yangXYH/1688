@@ -88,6 +88,22 @@ by `scripts/generate_agent_context.mjs`.
 - Browser probes under `scripts/probe-*.mjs` are exploratory tools, not stable
   verification gates.
 
+## Visible Chrome Extension
+
+`extension/` is an optional MV3 transport for the user's logged-in Chrome.
+`worker.js` owns visible search/supplier tabs and scoped native DOM actions;
+`page-hook.js` captures only IM history responses and refreshes the existing
+read-history request without reloading editable chat pages. `content.js`
+stops a supplier's automation on trusted user interaction or an existing draft.
+The side panel controls scoped batches; native 旺旺 remains the reply editor.
+
+`scripts/extension-bridge.mjs` maps the questionnaire's existing read/inquiry
+operations to finite tasks, authenticated by extension origin and connection token.
+The local server still owns model credentials, evidence, budgets and persistent
+outbox. Extension mode bypasses the CLI-owned browser/profile; native Chrome cookies
+are never exported. Missing heartbeat or side-panel closure pauses execution.
+See `extension/README.md` and `docs/specs/seller-im.md` for installation/recovery.
+
 ## Generated Context
 
 - Run `pnpm agent-context` after changing commands, source layout, tests, or

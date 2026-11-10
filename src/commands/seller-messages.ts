@@ -20,6 +20,7 @@ export interface SellerMessagesOpts {
   limit?: string;
   since?: string;
   watch?: boolean;
+  inspect?: boolean;
   interval?: string;
   profile?: string;
   headed?: boolean;
@@ -32,6 +33,7 @@ export interface SellerMessagesArgs {
   offerId?: string;
   myLoginId: string;
   limit: number;
+  inspect?: boolean;
   headed?: boolean;
 }
 
@@ -52,6 +54,7 @@ export interface Message {
   read: boolean;
   /** Type of message — auto-detected from DOM. */
   kind: MessageKind;
+  origin?: 'sellerAssistant' | 'platformNotice';
   /** Populated when kind === 'offerCard' or 'orderCard'. */
   card?: {
     title: string | null;
@@ -66,6 +69,7 @@ export interface Message {
 
 export interface SellerMessagesResult {
   conversation: string;
+  sellerLoginId?: string;
   total: number;
   messages: Message[];
 }
@@ -98,6 +102,8 @@ interface LwpUserMessageModel {
       senderNickName?: string;
       senderMainUserId?: string | number;
       bizuniqueID?: string;
+      biMsgType?: string;
+      dynamic_msg_content?: string;
     };
   };
 }
@@ -112,7 +118,7 @@ function formatBeijingTime(ms: number): string {
   );
 }
 
-function parseOneWsMessage(
+export function parseOneWsMessage(
   m: LwpUserMessageModel,
   myLoginId: string,
 ): (Message & { _sortMs: number }) | null {
@@ -133,12 +139,16 @@ function parseOneWsMessage(
   const read = Number(m.readStatus ?? 0) === 2;
 
   let kind: MessageKind = 'text';
+  let origin: Message['origin'];
   let contentText = '';
   let card: Message['card'] | undefined;
 
   const ct = content.contentType;
   if (ct === 1) {
     contentText = String(content.text?.content ?? '');
+    if (/^商家长时间没有回复[，,]平台已通知商家[，,]请耐心等待[。!！]?$/.test(contentText)) {
+      kind = 'autoReply'; origin = 'platformNotice';
+    }
     const offerMatch = contentText.match(
       /https?:\/\/detail\.1688\.com\/offer\/(\d+)\.html/i,
     );
@@ -158,6 +168,18 @@ function parseOneWsMessage(
     const biz = ext.bizuniqueID ?? '';
     if (biz.startsWith('cbu_offer_reply')) kind = 'autoReply';
     else if (biz.startsWith('cbu_im_msg_assessment')) kind = 'assessment';
+    else if (biz.startsWith('cbu_official_assistant_v1#') && /^bc_0_389001_/.test(ext.biMsgType ?? '')) {
+      kind = 'autoReply'; origin = 'platformNotice';
+    } else if (/^(?:cbu_official_assistant_v1|wireless-wwpush-qcxy)#/.test(biz) && /^bc_0_360001_/.test(ext.biMsgType ?? '') && contentText.trim()) {
+      let templates: unknown;
+      try { templates = JSON.parse(ext.dynamic_msg_content ?? ''); } catch { /* remain other */ }
+      const textOnly = Array.isArray(templates) && templates.length > 0 && templates.every((t) =>
+        t?.templateId === 360001 && Array.isArray(t.templateData?.listData) && t.templateData.listData.length > 0 &&
+        t.templateData.listData.every((item: { type?: string; content?: string; imageUrl?: string; isLink?: string | boolean }) =>
+          item.type === 'richText' && item.content === contentText && !item.imageUrl && (item.isLink === 'false' || item.isLink === false)));
+      kind = textOnly ? 'text' : 'other';
+      if (textOnly) origin = 'sellerAssistant';
+    }
     else kind = 'other';
   } else {
     contentText = `[contentType=${ct}]`;
@@ -172,6 +194,7 @@ function parseOneWsMessage(
     content: contentText,
     read,
     kind,
+    ...(origin ? { origin } : {}),
     ...(card ? { card } : {}),
     ...(messageId ? { messageId } : {}),
     _sortMs: createAt,
@@ -278,6 +301,7 @@ export async function executeRaw(
   args: SellerMessagesArgs,
 ): Promise<SellerMessagesResult> {
   const page = await ctx.newPage();
+  let inspected = false;
 
   // ALWAYS collect WebSocket frames (LWP protocol). Used as the primary data
   // source for messages — DOM extraction is only the fallback.
@@ -386,6 +410,11 @@ export async function executeRaw(
       );
     }
 
+    if (args.inspect && !args.searchNames.length && !args.sellerLoginId) {
+      inspected = true;
+      return { conversation: '旺旺会话列表（人工查看）', total: 0, messages: [] };
+    }
+
     await findImInput(page);
     await sleep(3000);
 
@@ -487,6 +516,7 @@ export async function executeRaw(
           /* enrichment is best-effort */
         }
       }
+      inspected = true;
       return {
         conversation: matched ?? '?',
         total: wsMessages.length,
@@ -665,18 +695,29 @@ export async function executeRaw(
       });
     });
 
+    inspected = true;
     return {
       conversation: matched ?? '?',
       total: raw.length,
       messages: raw.slice(-Math.max(1, args.limit)),
     };
   } finally {
+    if (args.inspect && inspected && !page.isClosed()) {
+      info('旺旺会话已打开供查看；此命令只读取消息。关闭会话窗口后结束。');
+      await page.bringToFront().catch(() => {});
+      await new Promise<void>((resolve) => {
+        page.once('close', () => resolve());
+        if (page.isClosed()) resolve();
+      });
+    }
     await page.close().catch(() => {});
   }
 }
 
 export async function run(opts: SellerMessagesOpts): Promise<void> {
-  if (!opts.target && !opts.offer) {
+  if (opts.inspect && opts.watch) throw new CliError(2, 'BAD_INPUT', '--inspect cannot be combined with --watch.');
+  if (opts.inspect) opts = { ...opts, headed: true };
+  if (!opts.target && !opts.offer && !opts.inspect) {
     throw new CliError(
       2,
       'BAD_INPUT',
@@ -747,7 +788,7 @@ export async function run(opts: SellerMessagesOpts): Promise<void> {
     };
   } else {
     args = {
-      searchNames: [opts.target!],
+      searchNames: opts.target ? [opts.target] : [],
       myLoginId: state.nick,
       limit,
       headed: opts.headed,
@@ -757,9 +798,10 @@ export async function run(opts: SellerMessagesOpts): Promise<void> {
   const fetchOnce = async (): Promise<SellerMessagesResult> => {
     const result = await dispatch<SellerMessagesArgs, SellerMessagesResult>(
       'seller-messages',
-      args,
+      { ...args, ...(opts.inspect ? { inspect: true } : {}) },
       { headed: opts.headed, profile: opts.profile },
     );
+    if (args.sellerLoginId) result.sellerLoginId = args.sellerLoginId;
     if (sinceMs > 0) {
       const filtered = result.messages.filter((m) => {
         if (!m.time) return false;

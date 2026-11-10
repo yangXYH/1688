@@ -7,6 +7,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createProductWorkbook } from './web-export.mjs';
 import { root as sessionRoot } from '../dist/session/paths.js';
+import { SupplierDialogue } from './supplier-dialogue.mjs';
+import { ExtensionBridge, EXTENSION_ID, EXTENSION_ORIGIN } from './extension-bridge.mjs';
+import { encodeGbkPercent } from '../dist/util/encoding.js';
+import JSZip from 'jszip';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web');
@@ -31,6 +35,16 @@ let loginFlow = {
   finishedAt: null,
 };
 let loginChild = null;
+const inquirySearches = new Map();
+
+function attachInquirySource(data, keyword, filters) {
+  const id = randomUUID();
+  const createdAt = new Date().toISOString();
+  const offers = Array.isArray(data.offers) ? data.offers : [];
+  inquirySearches.set(id, { id, keyword, createdAt, filters, offers });
+  while (inquirySearches.size > 20) inquirySearches.delete(inquirySearches.keys().next().value);
+  return { ...data, inquirySource: { id, keyword, createdAt } };
+}
 
 function serializeCli(task) {
   const run = cliQueue.then(task);
@@ -218,6 +232,16 @@ function assertLoginNotRunning() {
 
 function parseCliJson(result) {
   if (result.code !== 0) {
+    // Doctor writes its actionable checks to stdout before exiting with an
+    // empty DOCTOR_FAILED error on stderr. Preserve those diagnostics.
+    let report;
+    try { report = JSON.parse(result.stdout.trim()); } catch { /* not a doctor report */ }
+    const failedChecks = report?.ok === false && Array.isArray(report.checks)
+      ? report.checks.filter((check) => check.status === 'fail') : [];
+    if (failedChecks.length) {
+      const message = failedChecks.map((check) => `${check.name}: ${check.message}${check.fix ? `；处理方式：${check.fix}` : ''}`).join('\n');
+      throw Object.assign(new Error(`环境自检未通过：\n${message}`), { code: 'DOCTOR_FAILED', exitCode: result.code, details: { checks: failedChecks } });
+    }
     // CLI failures are JSON on stderr; stdout may contain partial success data.
     const candidates = [result.stderr.trim(), ...result.stderr.trim().split('\n').reverse(), result.stdout.trim()];
     for (const candidate of candidates) {
@@ -381,7 +405,7 @@ async function createUploadedImage(body) {
 }
 
 function sendStatic(res, filename) {
-  const types = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8' };
+  const types = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'supplier-ui.js': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8', 'extension-install.html':'text/html; charset=utf-8', 'extension-install.js':'text/javascript; charset=utf-8', 'extension-install.css':'text/css; charset=utf-8' };
   return readFile(path.join(WEB, filename)).then((body) => {
     res.writeHead(200, {
       'content-type': types[filename],
@@ -396,18 +420,172 @@ function sendStatic(res, filename) {
   });
 }
 
+const extensionBridge = new ExtensionBridge();
+const dialogue = new SupplierDialogue({ directory: RUNTIME, browserReady: async () => extensionBridge.ready(), cli: (args, before, context) => {
+  if (dialogue.transport === 'extension') return extensionBridge.call(args, before, context);
+  return serializeCli(async () => {
+  assertLoginNotRunning();
+  if (before) await before();
+  return parseCliJson(await runCli(args));
+}); } });
+await dialogue.init();
+if (process.env.BB1688_MODEL_ENDPOINT && process.env.BB1688_MODEL_NAME) {
+  dialogue.configure({ endpoint: process.env.BB1688_MODEL_ENDPOINT, model: process.env.BB1688_MODEL_NAME, apiKey: process.env.BB1688_MODEL_KEY ?? '', workers: 2 });
+}
+const dialogueTimer = setInterval(() => {
+  if (dialogue.transport === 'extension' && dialogue.running && !extensionBridge.connected) {
+    dialogue.pause('Chrome 插件已断开，自动化暂停。请重新打开插件侧栏。'); extensionBridge.cancelAll();
+  }
+  dialogue.tick();
+}, 1000);
+dialogueTimer.unref();
+
+async function startSearchBatch(body, transport = 'cli') {
+  if (transport === 'cli' && dialogue.transport === 'extension') throw Object.assign(new Error('已切换为 Chrome 插件模式，请从插件启动，避免混用浏览器。'), { status: 409 });
+  if (!dialogue.config) throw Object.assign(new Error('请先配置模型，再启动询盘。'), { status: 400 });
+  if (dialogue.running || dialogue.starting || dialogue.active.size) throw Object.assign(new Error('请暂停并等待当前操作结束后再启动。'), { status: 409 });
+  const source = inquirySearches.get(body.sourceId);
+  if (!source || Date.now() - Date.parse(source.createdAt) > 7200000) throw Object.assign(new Error('搜索结果已过期，请重新搜索或读取当前搜索页。'), { status: 409 });
+  if (!Array.isArray(body.offerIds) || body.offerIds.length < 1 || body.offerIds.length > 100 || body.offerIds.some((id) => typeof id !== 'string' || !source.offers.some((o) => String(o.offerId) === id))) throw Object.assign(new Error('询盘对象必须来自本次搜索结果，每批 1 到 100 件。'), { status: 400 });
+  if (body.approvedTemplates !== true) throw Object.assign(new Error('请先查看并授权对象和话术。'), { status: 400 });
+  const maxSends = body.maxSends ?? 100;
+  if (!Number.isInteger(maxSends) || maxSends < 1 || maxSends > 1000) throw Object.assign(new Error('发送上限应为 1 到 1000 条。'), { status: 400 });
+  if (transport === 'extension') extensionBridge.ready();
+  const targets = [...new Set(body.offerIds)];
+  const provenance = { searchId: source.id, keyword: source.keyword, createdAt: source.createdAt, filters: source.filters };
+  await dialogue.create({ targets, mode: 'automatic', approvedTemplates: true, needsCertificate: body.needsCertificate !== false, source: provenance, autoClarify: body.approvedClarifications === true });
+  const jobs = dialogue.jobs.filter((j) => targets.includes(j.offerId));
+  for (const job of jobs) {
+    const offer = source.offers.find((o) => String(o.offerId) === job.offerId);
+    if (!job.source) job.source = provenance;
+    job.mode = 'automatic'; job.autoClarify = body.approvedClarifications === true;
+    if (job.phase === 'draft' && job.draft.text === job.questions[job.step]?.text) job.draft.approved = true;
+    job.title = String(offer.title ?? '').slice(0, 300);
+    job.searchHistory = [...(job.searchHistory ?? []).filter((s) => s.searchId !== source.id), provenance].slice(-10);
+    if (job.phase === 'review' && job.outbox?.status === 'sent') await dialogue.action(job.id, { action: 'refresh' });
+  }
+  await dialogue.persist();
+  const jobIds = jobs.map((j) => j.id);
+  if (jobs.some((j) => !['qualified', 'rejected', 'duplicate', 'stopped', 'manual'].includes(j.phase))) await dialogue.start(maxSends, jobIds, transport);
+  return { ...dialogue.snapshot(), triggeredJobIds: jobIds };
+}
+
+async function extensionRequest(req, res, url) {
+  const host = String(req.headers.host ?? '').toLowerCase();
+  if (![ `127.0.0.1:${server.address().port}`, `localhost:${server.address().port}` ].includes(host) || req.headers.origin !== EXTENSION_ORIGIN) {
+    return sendJson(res, 403, { message: '只接受已安装的采货台 Chrome 插件。' });
+  }
+  res.setHeader('access-control-allow-origin', EXTENSION_ORIGIN);
+  res.setHeader('vary', 'Origin');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type, x-1688-bridge' }); return res.end();
+  }
+  if (req.method !== 'POST') return sendJson(res, 405, { message: '只接受 POST。' });
+  const body = await readJson(req);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('无效插件请求。'), { status: 400 });
+  if (url.pathname === '/api/extension/connect') {
+    if (dialogue.active.size) throw Object.assign(new Error('请等待当前操作结束后连接。'), { status: 409 });
+    let expected = null; try { expected = JSON.parse(await readFile(path.join(RUNTIME, 'state.json'), 'utf8')).nick ?? null; } catch { /* fresh home */ }
+    const loginId = body.loginId || expected;
+    if (expected && loginId !== expected) throw Object.assign(new Error(`为避免混用历史，请登录当前采购账号 ${expected}；其他账号需使用独立会话目录。`), { status: 409 });
+    dialogue.pause('已连接 Chrome 插件，请在插件中选择搜索对象并启动。');
+    dialogue.transport = 'extension';
+    await dialogue.persist();
+    return sendJson(res, 200, { ...extensionBridge.connect(loginId), extensionId: EXTENSION_ID });
+  }
+  extensionBridge.authorize(req.headers['x-1688-bridge']);
+  let result;
+  switch (url.pathname) {
+    case '/api/extension/state': result = { ...dialogue.snapshot(), bridge: extensionBridge.snapshot() }; break;
+    case '/api/extension/config': dialogue.configure(body); result = { config: dialogue.snapshot().config }; break;
+    case '/api/extension/search-url': {
+      const keyword = String(body.keyword ?? '').trim();
+      if (!keyword || keyword.length > 100) throw Object.assign(new Error('关键词需要 1 到 100 字。'), { status: 400 });
+      result = { url: `https://s.1688.com/selloffer/offer_search.htm?keywords=${encodeGbkPercent(keyword)}` }; break;
+    }
+    case '/api/extension/register-search': {
+      const page = new URL(String(body.url));
+      if (page.hostname !== 's.1688.com' || page.protocol !== 'https:' || !page.pathname.includes('offer_search')) throw Object.assign(new Error('请先在 1688 商品搜索页读取结果。'), { status: 400 });
+      if (typeof body.keyword !== 'string' || body.keyword.length > 100 || !Array.isArray(body.offers) || !body.offers.length || body.offers.length > 100 || body.offers.some((o) => !/^\d{1,30}$/.test(String(o.offerId)) || typeof o.title !== 'string' || o.title.length > 500)) throw Object.assign(new Error('搜索结果无效。'), { status: 400 });
+      result = attachInquirySource({ offers: body.offers.map((o) => ({ offerId: String(o.offerId), title: o.title, supplier: { name: String(o.supplier?.name ?? '').slice(0, 200) } })) }, body.keyword, { transport: 'extension', url: page.href }); break;
+    }
+    case '/api/extension/start': result = await startSearchBatch(body, 'extension'); break;
+    case '/api/extension/pause': dialogue.pause('你已从 Chrome 插件暂停。'); extensionBridge.cancelAll(); await dialogue.persist(); result = { ok: true }; break;
+    case '/api/extension/action':
+      if (!['takeover', 'resume-browser', 'accept', 'reject', 'refresh', 'approve', 'reply', 'sent', 'not-sent', 'retry'].includes(body.action)) throw Object.assign(new Error('无效会话操作。'), { status: 400 });
+      if (body.action === 'takeover') extensionBridge.cancelJob(body.id);
+      await dialogue.action(body.id, body); result = { ok: true }; break;
+    case '/api/extension/resume':
+      await dialogue.start(body.maxSends ?? 100, body.jobIds ?? null, 'extension'); result = { ok: true }; break;
+    case '/api/extension/poll': result = { tasks: dialogue.running ? extensionBridge.poll(body.limit) : (extensionBridge.lastSeen = Date.now(), []), running: dialogue.running }; break;
+    case '/api/extension/permit': {
+      const task = extensionBridge.tasks.get(body.id);
+      const job = task && dialogue.jobs.find((j) => j.id === task.jobId);
+      result = { allowed: !!(task?.delivered && dialogue.running && job && !job.manual) }; break;
+    }
+    case '/api/extension/result': {
+      const task = extensionBridge.tasks.get(body.id);
+      if (body.ok && task?.op === 'messages') {
+        const data = body.data;
+        if (!data || typeof data.sellerLoginId !== 'string' || data.sellerLoginId.length > 100) throw Object.assign(new Error('卖家身份无效。'), { status: 400 });
+        let messages = data.messages;
+        if (Array.isArray(data.models)) {
+          if (data.models.length > 200) throw Object.assign(new Error('消息过多。'), { status: 400 });
+          const { parseOneWsMessage } = await import('../dist/commands/seller-messages.js');
+          messages = data.models.map((m) => parseOneWsMessage(m, extensionBridge.loginId)).filter(Boolean).map(({ _sortMs, ...m }) => m);
+        }
+        if (!Array.isArray(messages) || messages.length > 200 || messages.some((m) => typeof m.content !== 'string' || m.content.length > 10000 || typeof m.isMine !== 'boolean')) throw Object.assign(new Error('消息格式无效。'), { status: 400 });
+        body.data = { conversation: data.sellerLoginId, sellerLoginId: data.sellerLoginId, messages, total: messages.length };
+      }
+      result = { accepted: extensionBridge.finish(body.id, body) }; break;
+    }
+    case '/api/extension/disconnect': dialogue.pause('Chrome 侧栏已关闭，自动化暂停。'); extensionBridge.disconnect(); result = { ok: true }; break;
+    default: return sendJson(res, 404, { message: '插件接口不存在。' });
+  }
+  return sendJson(res, 200, result);
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? `${HOST}:${PORT}`}`);
     if (req.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(res, 200, { ok: true, exportSchemaVersion: EXPORT_SCHEMA_VERSION, offerDedupeVersion: 1 });
     }
+    if (url.pathname.startsWith('/api/extension/')) return await extensionRequest(req, res, url);
 
     assertLocalRequest(req);
+    if (req.method === 'GET' && ['/extension-install.html','/extension-install.js','/extension-install.css'].includes(url.pathname)) return await sendStatic(res, url.pathname.slice(1));
+    if (req.method === 'GET' && url.pathname === '/extension.zip') {
+      const zip = new JSZip();
+      for (const file of ['manifest.json','worker.js','page-hook.js','content.js','content.css','panel.html','panel.js','panel.css','README.md']) zip.file(file, await readFile(path.join(ROOT,'extension',file)));
+      const bytes=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE'});
+      res.writeHead(200,{'content-type':'application/zip','content-length':bytes.length,'content-disposition':'attachment; filename="1688-chrome-extension.zip"','cache-control':'no-store'});return res.end(bytes);
+    }
+    if (req.method === 'GET' && url.pathname === '/api/extension-info') return sendJson(res, 200, { extensionId: EXTENSION_ID, path: path.join(ROOT, 'extension'), ...extensionBridge.snapshot() });
 
     if (req.method === 'GET' && url.pathname === '/') return await sendStatic(res, 'index.html');
     if (req.method === 'GET' && url.pathname === '/app.js') return await sendStatic(res, 'app.js');
     if (req.method === 'GET' && url.pathname === '/style.css') return await sendStatic(res, 'style.css');
+    if (req.method === 'GET' && url.pathname === '/supplier-ui.js') return await sendStatic(res, 'supplier-ui.js');
+
+    if (req.method === 'GET' && url.pathname === '/api/supplier') return sendJson(res, 200, dialogue.snapshot());
+    if (req.method === 'POST' && url.pathname.startsWith('/api/supplier/')) {
+      const body = await readJson(req);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return sendJson(res, 400, { message: '问答请求必须是 JSON 对象。' });
+      switch (url.pathname) {
+        case '/api/supplier/config': dialogue.configure(body); break;
+        case '/api/supplier/test': return sendJson(res, 200, { decision: await dialogue.test() });
+        case '/api/supplier/jobs': await dialogue.create(body); break;
+        case '/api/supplier/start':
+          if (dialogue.transport === 'extension') throw Object.assign(new Error('请在 Chrome 插件中恢复自动化。'), { status: 409 });
+          await dialogue.start(body.maxSends, body.jobIds ?? null); break;
+        case '/api/supplier/from-search': return sendJson(res, 200, await startSearchBatch(body));
+        case '/api/supplier/pause': dialogue.pause(); extensionBridge.cancelAll(); await dialogue.persist(); break;
+        case '/api/supplier/action': await dialogue.action(body.id, body); break;
+        default: return sendJson(res, 404, { message: '问答接口不存在。' });
+      }
+      return sendJson(res, 200, dialogue.snapshot());
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/status') {
       if (loginFlow.state === 'starting' || loginFlow.state === 'waiting') {
@@ -453,6 +631,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/login') {
+      dialogue.pause('扫码登录期间问答已暂停，登录后请手动启动。');
       return await serializeCli(async () => {
         if (loginFlow.state === 'starting' || loginFlow.state === 'waiting') {
           return sendJson(res, 200, loginSnapshot());
@@ -507,7 +686,7 @@ const server = createServer(async (req, res) => {
       return await serializeCli(async () => {
         assertLoginNotRunning();
         const data = parseCliJson(await runCli(args, max > 50 ? 330_000 : 180_000));
-        return sendJson(res, 200, data);
+        return sendJson(res, 200, attachInquirySource(data, keyword, { sort, priceMin: body.priceMin, priceMax: body.priceMax, province: body.province, city: body.city, verified: body.verified, excludeAds: body.excludeAds === true }));
       });
     }
 
@@ -553,6 +732,9 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    clearInterval(dialogueTimer);
+    dialogue.pause();
+    extensionBridge.disconnect();
     if (loginChild) loginChild.kill();
     server.close(() => process.exit(0));
   });

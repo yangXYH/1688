@@ -17,7 +17,16 @@ selection and query provenance are retained per mode until page refresh.
 Failures clearly mark older results; exports preserve their original query.
 On-demand details support MOQ, price tiers and SKU comparison for up to five
 selected offers. QR login remains an explicit user-confirmed action. This UI
-does not add seller messaging, cart or checkout actions.
+also includes a **供应商问答** view for model-assisted pre-sale screening. It
+defaults to per-message approval; automatic fixed-question sending requires explicit
+target/template authorization. See [Seller IM](specs/seller-im.md) for configuration,
+concurrency, persistence and recovery. Cart and checkout are not part of this UI.
+
+The normal inquiry entry is now in the keyword search results: **开始自动询盘**
+uses checked products, or the first N results (default 5). After reviewing targets
+and fixed questions, the button creates and starts that scoped batch and displays
+conversations/results inline on the search page. Model settings are also available
+inline. Search receipts prevent arbitrary or stale product IDs being contacted.
 
 Result-limit choices are 20, 30, 50, 100, 500 and 1000 for all three views.
 These are upper limits, not guaranteed counts. Excel export accepts up to
@@ -134,9 +143,18 @@ search results. Shared flags:
 
 ```bash
 1688 seller inquire <offerId> <message>
+1688 seller inquire <offerId> <message> --to <sellerLoginId> --text-only
 1688 seller messages --offer <offerId>
 1688 seller messages --offer <offerId> --watch [--interval N]
+1688 seller messages --inspect
+1688 seller messages --offer <offerId> --inspect
 ```
+
+`--inspect` opens a visible browser and keeps the conversation open until you
+close it. With no target it opens the current account's conversation list only;
+this does not imply any supplier history has been read. It never sends messages
+and cannot be combined with `--watch`. The profile daemon is paused while the
+window owns the profile and is resumed after it closes.
 
 `--watch` is long-running and emits one line of JSON per newly-arrived message
 when stdout is piped. Default interval is 30 seconds, minimum is 10 seconds.

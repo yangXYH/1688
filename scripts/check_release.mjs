@@ -48,7 +48,7 @@ if (packed.error || packed.status !== 0) {
 } else {
   try {
     const paths = new Set(JSON.parse(packed.stdout)[0].files.map((file) => file.path));
-    for (const file of ['web/index.html', 'web/app.js', 'web/style.css', 'scripts/web-ui.mjs', 'scripts/web-export.mjs', 'scripts/web-cell-images.mjs']) {
+    for (const file of ['web/index.html', 'web/app.js', 'web/supplier-ui.js', 'web/style.css', 'web/extension-install.html', 'web/extension-install.js', 'web/extension-install.css', 'scripts/web-ui.mjs', 'scripts/supplier-dialogue.mjs', 'scripts/extension-bridge.mjs', 'scripts/package-extension.mjs', 'extension/manifest.json', 'extension/worker.js', 'extension/content.js', 'extension/page-hook.js', 'extension/content.css', 'extension/panel.html', 'extension/panel.js', 'extension/panel.css', 'extension/README.md', 'scripts/web-export.mjs', 'scripts/web-cell-images.mjs']) {
       if (!paths.has(file)) failures.push(`npm archive missing workbench file: ${file}.`);
     }
   } catch (error) {

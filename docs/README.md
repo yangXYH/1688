@@ -5,6 +5,7 @@ This directory is the canonical knowledge base for agents and humans working on
 
 ## Start Here
 
+- Chrome automation user manual (中文): [`chrome-extension-guide.zh-CN.md`](chrome-extension-guide.zh-CN.md)
 - Agent working principles: [`AGENT_WORKING_PRINCIPLES.md`](AGENT_WORKING_PRINCIPLES.md)
 - Repository architecture: [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
 - Default workflow: [`WORKFLOW.md`](WORKFLOW.md)

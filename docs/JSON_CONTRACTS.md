@@ -525,6 +525,7 @@ One-shot result:
 ```ts
 {
   conversation: string,
+  sellerLoginId?: string, // resolved canonical identity for offer/order scoped reads
   total: number,
   messages: Array<{
     sender: string,
@@ -534,6 +535,7 @@ One-shot result:
     read: boolean,
     kind: "text" | "offerCard" | "orderCard" | "autoReply"
         | "assessment" | "image" | "other",
+    origin?: "sellerAssistant" | "platformNotice",
     card?: {
       title: string | null,
       price: string | null,
@@ -550,6 +552,72 @@ Watch mode emits one object per new message:
 ```ts
 { conversation: string, message: Message }
 ```
+
+## Local supplier dialogue API
+
+`GET /api/supplier` returns `{running, starting, notice, sendCount, maxSends,
+config, questions, jobs}`. `config` is null or contains endpoint, model, workers
+and keyConfigured, never the API key. Jobs contain id, offerId, productUrl,
+sellerLoginId, mode (`review` or `automatic`), questions, step, phase, answers,
+transcript, seen IDs, draft, outbox and error. `qualified` means preliminary
+supplier claims satisfied the configured questions, not verified compliance.
+
+POST routes under `/api/supplier/`: `config` accepts endpoint/model/apiKey/workers;
+`test` calls the model with synthetic data and returns `{decision}`; `jobs`
+accepts targets/needsCertificate/mode/approvedTemplates; `start` accepts maxSends;
+`pause` pauses all work; `action` accepts job id and action. Mutations other than
+`test` return the same snapshot as GET. Approving a draft requires its current
+draftId and exact text. Actions include approve, accept/reject (human review),
+reply (approved clarification), sent/not-sent (uncertain outbox reconciliation),
+retry (manual recovery), and stop. Failures return `{message}` with HTTP status.
+Existing CLI/watch contracts are unchanged; `sellerLoginId` is additive.
+For an explicitly authorized supervising assistant, accept/reject may specify
+`reviewer: "assistant"`; the answer records that reviewer with `human: false`
+instead of claiming human confirmation. Ordinary UI review records a human reviewer.
+
+Search API responses add `inquirySource: {id, keyword, createdAt}`. POST
+`/api/supplier/from-search` takes sourceId, offerIds (1–100 IDs from that receipt),
+approvedTemplates:true, needsCertificate and optional maxSends. It creates/reuses
+jobs and starts only those jobs, returning the standard snapshot plus
+`triggeredJobIds`. Snapshot `scopeIds` is null or the running batch's job IDs.
+Jobs add `title`, `source` and `searchHistory` (up to 10 provenance entries).
+POST `start` optionally accepts jobIds to resume only that batch. Stale receipts
+return 409; targets outside a receipt and missing authorization return 400.
+`approvedClarifications:true` additionally authorizes the displayed fixed
+clarification for each question once. Jobs expose autoClarify, clarifications
+(per-question counts), reviewEvents and lastInterpretation. Model decisions now
+include `wait` for nonbusiness greetings/hold messages. Questions expose the
+predefined clarification text. Action `refresh` re-reads pending messages for an
+already sent reviewed question; it does not resend the question or mark it passed.
+
+## Local Chrome Extension Bridge
+
+Supplier snapshots and version-1 persisted records add `transport: "cli" | "extension"`;
+older records without it default to CLI. Jobs may add `manual`
+and `rebaseline`. Extension `state` adds `bridge: {connected, loginId, lastSeen,
+pending}`. None of these responses contains a model API key or browser cookies.
+Actions add `takeover` and `resume-browser`; resume preserves the current question
+and baselines current history. Pending sends must be reconciled before resuming.
+
+POST `/api/extension/*` accepts only the stable extension origin and, after
+`connect`, its `x-1688-bridge` token. Available routes: connect, state, config,
+search-url, register-search, start, pause, resume, action, poll, permit, result,
+disconnect. `register-search` accepts a native search URL, keyword and bounded
+offers; it returns the existing inquirySource receipt. `start` uses the same
+sourceId/offerIds/approval/budget contract as from-search. Extension start does
+not call doctor/daemon or the CLI-owned profile.
+
+`poll` returns `{running, tasks}` (max 2), each task `{id, op, offerId, jobId,
+loginId, text?, sellerLoginId?, initial?}`. Only seller messages/inquire operations
+exist. `permit` returns `{allowed}` and is checked immediately before native send.
+`result` takes `{id, ok, data?, error?}`; message data contains sellerLoginId and
+either sanitized structured models or bounded parsed messages. Send errors state
+`safeNotSent`; missing confirmation is treated as uncertain, never replayed.
+These are local internal routes and do not change public CLI JSON contracts.
+
+GET `/api/extension-info` exposes the unpacked directory, stable ID and connection
+status for the local installer page. `/extension.zip` downloads the allowlisted
+extension sources only, without session files or credentials.
 
 ## `cart add`
 

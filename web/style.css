@@ -444,3 +444,49 @@ select:disabled { color: #a1ac95; background: #f8faf4; }
   .product-id { display: inline; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+[hidden] { display: none !important; }
+.supplier-panel { margin-top: 24px; }
+.search-inquiry { margin: 18px 0; border-color: #a9c9b3; background: #f6fbf7; }
+.search-inquiry h3 { margin: 0; font-size: 18px; }
+.search-inquiry .dialogue-actions { justify-content: flex-start; }
+.search-inquiry input[type=number] { max-width: 100px; }
+.dialogue-flow-source { padding: 16px 20px; background: #e8f1e9; border-radius: 10px; margin-bottom: 14px; color: #27634b; }
+.supplier-panel.flow-inline .supplier-setup, .supplier-panel.flow-inline .dialogue-banner { display: none; }
+.supplier-panel.flow-inline .dialogue-controls { margin-top: 0; }
+.supplier-panel.flow-inline.flow-config .supplier-setup { display: grid; grid-template-columns: 1fr; }
+.supplier-panel.flow-inline #supplier-create { display: none; }
+.supplier-panel.native-browser .supplier-workspace, .supplier-panel.native-browser .dialogue-controls, .supplier-panel.native-browser .supplier-setup, .supplier-panel.native-browser .dialogue-banner { display: none; }
+.dialogue-banner { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px; background: #e8f1e9; border-radius: 16px; margin-bottom: 20px; }
+.dialogue-banner strong { font-size: 22px; }
+.dialogue-banner p, .dialogue-box p { color: #637568; line-height: 1.7; font-size: 13px; }
+.supplier-setup { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.dialogue-box { background: #fff; border: 1px solid #dce5de; border-radius: 14px; padding: 22px; min-width: 0; }
+.dialogue-box h2 { font-size: 18px; margin: 0 0 16px; }
+.dialogue-box h3 { font-size: 15px; margin: 24px 0 12px; }
+.dialogue-box label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; margin: 14px 0; }
+.dialogue-box input:not([type=checkbox]), .dialogue-box textarea, .dialogue-box select { width: 100%; border: 1px solid #d1ddd4; border-radius: 8px; background: #fff; padding: 11px; color: #243d2e; font: inherit; }
+.dialogue-box textarea { resize: vertical; line-height: 1.6; }
+.dialogue-box input:focus, .dialogue-box textarea:focus { outline: 2px solid #729f80; }
+.dialogue-box label.dialogue-check { flex-direction: row; align-items: flex-start; line-height: 1.6; }
+.dialogue-check input { margin-top: 4px; }
+.dialogue-box details { font-size: 13px; line-height: 1.8; margin: 16px 0; }
+.dialogue-box details ol { padding-left: 22px; }
+.dialogue-controls { display: flex; align-items: center; gap: 18px; margin: 20px 0; flex-wrap: wrap; }
+.dialogue-controls > div { flex: 1; min-width: 200px; }
+.dialogue-controls label { max-width: 160px; }
+.supplier-workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; align-items: start; }
+#supplier-jobs { max-height: 800px; overflow-y: auto; }
+.dialogue-job { display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; padding: 16px 12px; background: #fff; border: 0; border-bottom: 1px solid #e1e9e3; cursor: pointer; overflow-wrap: anywhere; }
+.dialogue-job.chosen { background: #edf5ef; border-radius: 8px; }
+.dialogue-job span { color: #27634b; font-size: 13px; }
+.dialogue-job small { color: #76867b; }
+.dialogue-detail-heading, .dialogue-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dialogue-detail-heading a { color: #27634b; font-size: 13px; }
+.dialogue-error { background: #fff3e0; color: #86531c !important; padding: 12px; border-radius: 8px; overflow-wrap: anywhere; }
+.dialogue-box pre, .dialogue-box blockquote { white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7f4; border-radius: 8px; padding: 12px; margin: 8px 0; font-size: 13px; }
+.dialogue-transcript { max-height: 480px; overflow-y: auto; margin-bottom: 20px; }
+.dialogue-bubble { padding: 12px; border-radius: 10px; background: #f5f6f4; margin: 10px 30px 10px 0; overflow-wrap: anywhere; }
+.dialogue-bubble.mine { background: #edf5ef; margin: 10px 0 10px 30px; }
+.dialogue-bubble small { font-size: 11px; color: #75837a; }
+.dialogue-bubble p { white-space: pre-wrap; margin-bottom: 0; }
+@media (max-width: 1000px) { .supplier-setup, .supplier-workspace { grid-template-columns: 1fr; } .dialogue-banner { flex-direction: column; align-items: flex-start; } #supplier-jobs { max-height: 300px; } }

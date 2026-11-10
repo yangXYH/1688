@@ -49,6 +49,29 @@ These commands contact real sellers:
 Before sending, show the message and target context unless the user has already
 given an explicit current-turn send instruction.
 
+## Local Questionnaire Approval
+
+The local supplier questionnaire implements the same seller-contact boundary:
+default per-message approval, or explicit authorization for the displayed fixed
+questions and selected offers in automatic mode. Search flow optionally also
+authorizes the displayed fixed clarification per question once; it does not
+authorize arbitrary model-generated wording. Generated free-text clarification
+always requires approval. Creating jobs alone does not start the scheduler.
+The development agent must not activate live jobs or contact real sellers merely
+to test this feature. No order placement or off-site contact is included.
+
+## Visible Chrome Plugin
+
+The optional plugin runs in the user's logged-in Chrome, not the CLI profile.
+Authorize exact search-result targets and displayed fixed wording in its side
+panel before starting. Arbitrary model text still requires individual approval.
+Clicking or typing in a native conversation takes over that supplier; existing
+drafts must never be overwritten. The plugin does not reload chat pages to poll.
+Side-panel closure or bridge heartbeat loss pauses the scheduler. Unconfirmed
+in-flight sends remain uncertain until explicitly reconciled in the native chat.
+Resolve login/verification in the current Chrome page; never loop around it.
+Do not export Chrome cookies or store model API keys in the plugin package.
+
 ## Cart Mutations
 
 These commands mutate buyer cart state:

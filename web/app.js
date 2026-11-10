@@ -8,6 +8,7 @@ const state = {
   busy: false,
   searchLabel: '',
   searchFailed: false,
+  inquirySource: null,
   workspaces: {},
   details: new Map(),
   failures: new Map(),
@@ -83,13 +84,14 @@ function setMode(mode) {
   if (!modeContent[mode] || state.busy) return;
   state.workspaces[state.mode] = {
     offers: state.offers, selected: state.selected, searchLabel: state.searchLabel,
-    searchFailed: state.searchFailed, filters: readKeywordFilters(),
+    searchFailed: state.searchFailed, inquirySource: state.inquirySource, filters: readKeywordFilters(),
   };
   state.mode = mode;
   const saved = state.workspaces[mode];
   state.offers = saved?.offers ?? [];
   state.searchLabel = saved?.searchLabel ?? '';
   state.searchFailed = saved?.searchFailed ?? false;
+  state.inquirySource = saved?.inquirySource ?? null;
   state.selected = saved?.selected ?? new Set();
   restoreKeywordFilters(saved?.filters);
   clearMessage();
@@ -198,6 +200,7 @@ function setBusy(value, buttonLabelId, idleLabel) {
   }
   byId(buttonLabelId).textContent = value ? '正在查找…' : idleLabel;
   byId('compare-button').disabled = value || state.selected.size === 0 || state.selected.size > 5;
+  updateSelectionUi();
   validatePrices();
   updateLoginButton();
 }
@@ -512,6 +515,7 @@ function updateSelectionUi() {
     input.checked = selected;
     input.closest('.product-card').classList.toggle('selected', selected);
   });
+  document.dispatchEvent?.(new Event('sourcing-selection-changed'));
 }
 
 function setResultView(view) {
@@ -530,6 +534,7 @@ function handlePayload(payload, label, requestedMax = 0) {
   state.selected.clear();
   state.searchLabel = label;
   state.searchFailed = false;
+  state.inquirySource = payload?.inquirySource ?? null;
   byId('comparison-panel').hidden = true;
   if (!offers.length) {
     byId('empty-title').textContent = '暂时没有匹配结果';

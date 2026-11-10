@@ -84,6 +84,41 @@ results and selection so export can be retried without refreshing the page.
 The updated API also accepts already-open 13-column pages that omit the
 optional request schema version. Explicit incompatible versions return 409.
 
+## Supplier Questionnaire Recovery
+
+The browser installation check accepts installed system Chrome by default, matching
+runtime and postinstall behavior. Bundled Chromium is required only when explicitly
+forced with `BB1688_FORCE_CHROMIUM=1` or when Chrome is unavailable. The fallback
+checks the exact Playwright executable, not arbitrary old cache directories.
+`doctor --no-launch` checks paths without launching a browser. Failed doctor checks
+and their fix hints are surfaced in the workbench instead of a bare exit code.
+An empty/finished questionnaire queue cannot start the doctor or daemon.
+
+Supplier questionnaire scheduling shares the local CLI queue, with bounded model
+workers outside it. Message-ID baselines and persisted pending model input prevent
+history replay across pauses. Account login/risk failures pause the whole scheduler;
+partial/uncertain sends require reconciliation and never retry automatically.
+The scheduler is paused after process restart. See `specs/seller-im.md`.
+
+## Chrome Plugin Recovery
+
+`extension/` is the optional native-Chrome transport. Keep the local service and
+side panel open. Extension updates need Reload in `chrome://extensions`; local
+server changes need a server restart. The stable manifest key keeps the local
+bridge origin unchanged. Connection tokens expire on disconnect and server
+restart, so reconnect explicitly. Model credentials are process-memory only.
+
+The plugin journals dispatched operation IDs before executing and never blindly
+replays an interrupted send. Poll results are delivered once; lost workers and
+closed panels pause work. Manual takeover preserves the native editor. Restoring
+automation baselines current history instead of interpreting manual replies as
+questionnaire approval. No polling reloads editable chat pages. When synchronized
+history cannot be captured, fail or require review rather than invent message IDs.
+
+The optional `pnpm test:extension` uses Playwright Chrome for Testing and routed
+fixture pages. It never loads the user's Chrome profile or contacts sellers.
+The regular deterministic gate does not require this optional browser download.
+
 ## Live-Service Boundaries
 
 `pnpm test:unit` is the deterministic default. `pnpm test` also runs live

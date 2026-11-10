@@ -62,6 +62,15 @@ the live doctor checks returned `DOCTOR_FAILED` in the current local
 environment. The default agent gate uses `pnpm test:unit` to keep live checks
 explicit.
 
+Chrome plugin verification (2026-11-10): `pnpm agent-verify` passed 40 suites /
+293 deterministic tests plus typecheck, generated docs, agent map and release archive
+checks. `pnpm build` and `pnpm extension:pack` passed. The optional
+`pnpm test:extension` loaded MV3 in Chrome for Testing against five isolated native
+chat fixtures, sending 15 messages, advancing questions with overlapping mock-model
+calls (peak 2), preserving manual drafts/native replies, and pausing on panel close.
+No real seller was contacted by these tests. Installation and live 1688 compatibility
+in the user's normal Chrome remain manual follow-up.
+
 ## Quality Targets
 
 - 6 / 10: short map, docs map, generated indexes, and default verification
